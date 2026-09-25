@@ -15,7 +15,7 @@ from pathlib import Path
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
-from . import admin, db, jobs, llm, memory, metrics, reminders, tools, vapi, web_tools
+from . import admin, db, jobs, llm, memory, metrics, postcall, reminders, tools, vapi, web_tools
 from .assistant import build_assistant, caller_language
 from .config import get_settings
 from .logs import log_event, request_id, setup_logging
@@ -173,6 +173,7 @@ async def vapi_webhook(request: Request, background: BackgroundTasks):
             background.add_task(reminders.on_callback_ended, call_id, message.get("endedReason"))
         if transcript and not summary:
             background.add_task(summarize_call, call_id, transcript)
+        background.add_task(postcall.email_owner, call_id)  # after the summary task above
         if caller and is_trusted(caller, ctype, s):
             background.add_task(memory.remember_call, caller, call_id, message)
         background.add_task(jobs.deliver_for_call, call_id)

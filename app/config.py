@@ -83,6 +83,8 @@ class Settings:
     transfer_number: str
     timezone: str
     owner_email: str
+    # Email OWNER_EMAIL a summary after every call (still dry-run unless DRY_RUN=false).
+    post_call_email: bool
     # Admin dashboard (HTTP Basic). Disabled while ADMIN_PASSWORD is empty.
     admin_user: str
     admin_password: str
@@ -130,6 +132,7 @@ def load_settings() -> Settings:
         transfer_number=_e164(e("TRANSFER_NUMBER", "")),
         timezone=e("TIMEZONE", "UTC"),
         owner_email=e("OWNER_EMAIL", ""),
+        post_call_email=_bool("POST_CALL_EMAIL"),
         admin_user=e("ADMIN_USER", "admin"),
         admin_password=e("ADMIN_PASSWORD", ""),
         metrics_token=e("METRICS_TOKEN", ""),
