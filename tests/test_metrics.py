@@ -33,3 +33,14 @@ def test_metrics_endpoint_counts_requests_by_route_template():
     assert body.headers["content-type"].startswith("text/plain; version=0.0.4")
     assert 'voice_agent_http_requests_total{method="GET",route="/healthz",status="200"} 1' in body.text
     assert 'route="unmatched",status="404"' in body.text
+
+
+def test_metrics_token_is_optional_but_enforced_when_set(monkeypatch):
+    from app.config import get_settings
+    monkeypatch.setenv("METRICS_TOKEN", "scrape-me")
+    get_settings.cache_clear()
+    with TestClient(app) as c:
+        assert c.get("/metrics").status_code == 401
+        assert c.get("/metrics", headers={"Authorization": "Bearer nope"}).status_code == 401
+        ok = c.get("/metrics", headers={"Authorization": "Bearer scrape-me"})
+    assert ok.status_code == 200 and "voice_agent_http_requests_total" in ok.text

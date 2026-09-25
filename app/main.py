@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -63,7 +64,14 @@ async def request_context(request: Request, call_next):
 
 
 @app.get("/metrics", include_in_schema=False)
-async def prometheus_metrics() -> PlainTextResponse:
+async def prometheus_metrics(request: Request) -> PlainTextResponse:
+    token = get_settings().metrics_token
+    if token:  # Prometheus: `authorization: {credentials: <token>}` sends it as a Bearer token
+        auth = request.headers.get("authorization", "")
+        given = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+        if not hmac.compare_digest(given.encode(), token.encode()):
+            return PlainTextResponse("unauthorized\n", status_code=401,
+                                     headers={"WWW-Authenticate": "Bearer"})
     return PlainTextResponse(metrics.render(), media_type="text/plain; version=0.0.4")
 
 CALL_SUMMARY_SYSTEM = ("Summarise this phone call transcript in 2-3 sentences: what the caller "

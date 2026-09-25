@@ -60,6 +60,8 @@ class Settings:
     # Admin dashboard (HTTP Basic). Disabled while ADMIN_PASSWORD is empty.
     admin_user: str
     admin_password: str
+    # When set, GET /metrics needs `Authorization: Bearer <token>`.
+    metrics_token: str
     # Notifications. Nothing is sent unless DRY_RUN=false AND the channel is configured.
     dry_run: bool
     smtp_host: str
@@ -102,6 +104,7 @@ def load_settings() -> Settings:
         owner_email=e("OWNER_EMAIL", ""),
         admin_user=e("ADMIN_USER", "admin"),
         admin_password=e("ADMIN_PASSWORD", ""),
+        metrics_token=e("METRICS_TOKEN", ""),
         dry_run=_bool("DRY_RUN", True),
         smtp_host=e("SMTP_HOST", ""),
         smtp_port=int(e("SMTP_PORT", "587")),

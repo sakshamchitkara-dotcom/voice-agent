@@ -59,8 +59,15 @@ Bearer (or HMAC) credential in the Vapi dashboard and set `VAPI_CREDENTIAL_ID`. 
 - Single instance only: the rate limiter and deep-task workers are in-process and sqlite is
   local. Scale out by moving those to Redis/Postgres and a real queue.
 - Logs are one JSON object per line on stdout (`event`, `request_id`, `call_id`, `tool`, `ms`, ...).
-- Scrape `GET /metrics` with Prometheus. It is unauthenticated and only has aggregate labels (no
-  caller numbers). Block it at the proxy if you don't want it public.
+- Scrape `GET /metrics` with Prometheus. It only has aggregate labels (no caller numbers). Set
+  `METRICS_TOKEN` to require `Authorization: Bearer <token>`; in the Prometheus scrape config:
+
+  ```yaml
+  - job_name: voice-agent
+    scheme: https
+    static_configs: [{targets: ["voice-agent.fly.dev"]}]
+    authorization: {credentials: "<METRICS_TOKEN>"}
+  ```
 - Set `ADMIN_PASSWORD` (e.g. `fly secrets set ADMIN_PASSWORD=$(openssl rand -hex 16)`) to turn on
   the `/admin` dashboard. Serve it over HTTPS only, because Basic auth sends the password with
   every request.
