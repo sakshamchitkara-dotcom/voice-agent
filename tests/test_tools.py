@@ -209,3 +209,13 @@ def test_transfer_number_must_be_e164(monkeypatch):
     monkeypatch.setenv("TRANSFER_NUMBER", "555-1234")
     with pytest.raises(ValueError, match="E.164"):
         load_settings()
+
+
+async def test_event_times_with_an_offset_are_stored_as_local_time(monkeypatch):
+    monkeypatch.setenv("TIMEZONE", "America/Los_Angeles")
+    get_settings.cache_clear()
+    r = await tools._create_event({"title": "Standup", "starts_at": "2030-01-03T17:00Z"}, TRUSTED)
+    assert r == "Added Standup on Thursday January 03 at 09:00."
+    await tools._create_event({"title": "Coffee", "starts_at": "2030-01-03T08:30"}, TRUSTED)
+    assert await tools._list_events({}, TRUSTED) == ("Coffee on Thursday January 03 at 08:30. "
+                                                     "Standup on Thursday January 03 at 09:00.")

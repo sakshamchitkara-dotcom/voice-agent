@@ -138,10 +138,15 @@ async def _forget_me(a: dict, ctx: Ctx) -> str:
 
 
 def _parse_when(value: str) -> datetime:
+    """ISO date-time -> naive local time in TIMEZONE, the form events are stored and compared in.
+    A time with an offset ("...T16:00Z", "...+02:00") is converted, not just stripped."""
     try:
-        return datetime.fromisoformat(value)
+        when = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
     except ValueError:
         raise ValueError("starts_at must be an ISO date-time like 2026-09-26T15:00") from None
+    if when.tzinfo is not None:
+        when = when.astimezone(ZoneInfo(get_settings().timezone)).replace(tzinfo=None)
+    return when
 
 
 async def _create_event(a: dict, ctx: Ctx) -> str:
