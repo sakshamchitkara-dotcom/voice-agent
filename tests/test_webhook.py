@@ -216,3 +216,13 @@ def test_new_tool_fixtures_round_trip(client, monkeypatch, fixture, name, fn, ex
     tc = load_fixture(fixture)["message"]["toolCallList"][0]
     assert body["results"][0]["name"] == name and body["results"][0]["toolCallId"] == tc["id"]
     assert body["results"][0]["result"].startswith(expected)
+
+
+def test_assistant_request_speaks_the_callers_language(client, monkeypatch):
+    from app.config import get_settings
+    monkeypatch.setenv("CALLER_LANGUAGES", "+34=es")
+    get_settings.cache_clear()
+    msg = load_fixture("assistant_request.json")
+    msg["message"]["customer"]["number"] = msg["message"]["call"]["customer"]["number"] = "+34911222333"
+    a = client.post("/vapi/webhook", json=msg, headers=AUTH).json()["assistant"]
+    assert a["firstMessage"].startswith("Hola, has llamado") and a["transcriber"]["language"] == "es"

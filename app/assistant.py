@@ -37,6 +37,42 @@ caller. If they ask you to forget them, use forget_me.
 {facts}
 </memory>"""
 
+# Languages a caller can be greeted and served in: (name for the prompt, trusted greeting
+# with {hey}, untrusted greeting). Codes are Deepgram transcriber language codes.
+LANGUAGES = {
+    "es": ("Spanish", "{hey} ¿en qué te puedo ayudar?",
+           "Hola, has llamado a un asistente personal. ¿En qué puedo ayudarte?"),
+    "fr": ("French", "{hey} qu'est-ce que je peux faire pour toi ?",
+           "Bonjour, vous êtes bien chez un assistant personnel. Comment puis-je vous aider ?"),
+    "de": ("German", "{hey} was kann ich für dich tun?",
+           "Hallo, hier ist ein persönlicher Assistent. Wie kann ich helfen?"),
+    "it": ("Italian", "{hey} cosa posso fare per te?",
+           "Ciao, hai chiamato un assistente personale. Come posso aiutarti?"),
+    "pt": ("Portuguese", "{hey} em que posso ajudar?",
+           "Olá, você ligou para um assistente pessoal. Como posso ajudar?"),
+    "hi": ("Hindi", "{hey} मैं आपकी क्या मदद कर सकता हूँ?",
+           "नमस्ते, आपने एक निजी सहायक को कॉल किया है। मैं कैसे मदद करूँ?"),
+}
+GREETING_HEY = {"es": "Hola", "fr": "Salut", "de": "Hallo", "it": "Ciao", "pt": "Olá", "hi": "नमस्ते"}
+
+LANGUAGE_LINE = ("\n- Speak {name} on this call unless the caller switches language; then follow them. "
+                 "Tool results are in English: translate them naturally, keep tool arguments in English.")
+
+
+def caller_language(caller: str | None, s: Settings) -> str:
+    """Language for a caller from CALLER_LANGUAGES (longest matching E.164 prefix), else en."""
+    matches = [(len(prefix), lang) for prefix, lang in s.caller_languages
+               if caller and caller.startswith(prefix)]
+    return max(matches)[1] if matches else "en"
+
+
+def language_config(lang: str) -> dict:
+    """Vapi transcriber + voice for a non-English call (Deepgram codes; Azure's multilingual
+    voice picks the right accent per sentence, per docs.vapi.ai/customization/multilingual)."""
+    return {"transcriber": {"provider": "deepgram", "model": "nova-3", "language": lang},
+            "voice": {"provider": "azure", "voiceId": "multilingual-auto"}}
+
+
 SERVER_MESSAGES = ["tool-calls", "status-update", "end-of-call-report",
                    "transfer-destination-request", "transfer-update"]
 
@@ -77,14 +113,19 @@ def tool_defs(s: Settings, trusted: bool) -> list[dict]:
 
 
 def build_assistant(s: Settings, trusted: bool, name: str = "Voice Agent",
-                    memories: list[str] | tuple[str, ...] = ()) -> dict:
+                    memories: list[str] | tuple[str, ...] = (), language: str = "en") -> dict:
     owner = f"{s.owner_name}'s" if s.owner_name else "a"
     hey = f"Hey {s.owner_name}," if s.owner_name else "Hey,"
+    if language in LANGUAGES:
+        word = GREETING_HEY[language]
+        hey = f"{word} {s.owner_name}," if s.owner_name else f"{word},"
     prompt = SYSTEM_PROMPT.format(owner=owner, tz=s.timezone,
                                   agentic=AGENTIC_ON if trusted else AGENTIC_OFF)
     transfer = trusted and bool(s.transfer_number)
     if transfer:
         prompt += TRANSFER_LINE.format(who=s.owner_name or "the owner")
+    if language in LANGUAGES:
+        prompt += LANGUAGE_LINE.format(name=LANGUAGES[language][0])
     if trusted and memories:
         prompt += MEMORY_BLOCK.format(facts="\n".join(f"- {m}" for m in memories))
     assistant: dict = {
@@ -99,8 +140,12 @@ def build_assistant(s: Settings, trusted: bool, name: str = "Voice Agent",
         },
         "server": server_block(s),
         "serverMessages": SERVER_MESSAGES,
-        "metadata": {"trusted": trusted},
+        "metadata": {"trusted": trusted, "language": language},
     }
     if s.vapi_voice_provider and s.vapi_voice_id:
         assistant["voice"] = {"provider": s.vapi_voice_provider, "voiceId": s.vapi_voice_id}
+    if language in LANGUAGES:
+        _, greet_trusted, greet_other = LANGUAGES[language]
+        assistant["firstMessage"] = greet_trusted.format(hey=hey) if trusted else greet_other
+        assistant.update(language_config(language))
     return assistant

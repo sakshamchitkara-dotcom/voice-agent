@@ -22,6 +22,21 @@ def _e164(value: str) -> str:
     return value
 
 
+SUPPORTED_LANGUAGES = ("en", "es", "fr", "de", "it", "pt", "hi")
+
+
+def _languages(raw: str) -> tuple[tuple[str, str], ...]:
+    pairs = []
+    for item in filter(None, (x.strip() for x in raw.split(","))):
+        prefix, _, lang = item.partition("=")
+        prefix, lang = prefix.strip(), lang.strip().lower()
+        if not re.fullmatch(r"\+\d{1,15}", prefix) or lang not in SUPPORTED_LANGUAGES:
+            raise ValueError(f"CALLER_LANGUAGES entries look like +34=es (languages: "
+                             f"{', '.join(SUPPORTED_LANGUAGES)}), got {item!r}")
+        pairs.append((prefix, lang))
+    return tuple(pairs)
+
+
 def _choice(name: str, default: str, options: tuple[str, ...]) -> str:
     value = os.getenv(name, default).strip().lower() or default
     if value not in options:
@@ -62,6 +77,8 @@ class Settings:
     vapi_api_key: str
     vapi_phone_number_id: str
     owner_name: str
+    # (E.164 prefix, language) pairs from CALLER_LANGUAGES, e.g. "+34=es,+52=es,+33=fr".
+    caller_languages: tuple[tuple[str, str], ...]
     # E.164 number allowlisted callers can be transferred to (Vapi transferCall). Empty = off.
     transfer_number: str
     timezone: str
@@ -109,6 +126,7 @@ def load_settings() -> Settings:
         vapi_api_key=e("VAPI_API_KEY", ""),
         vapi_phone_number_id=e("VAPI_PHONE_NUMBER_ID", ""),
         owner_name=e("OWNER_NAME", ""),
+        caller_languages=_languages(e("CALLER_LANGUAGES", "")),
         transfer_number=_e164(e("TRANSFER_NUMBER", "")),
         timezone=e("TIMEZONE", "UTC"),
         owner_email=e("OWNER_EMAIL", ""),

@@ -16,7 +16,7 @@ from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
 from . import admin, db, jobs, llm, memory, metrics, reminders, tools, vapi, web_tools
-from .assistant import build_assistant
+from .assistant import build_assistant, caller_language
 from .config import get_settings
 from .logs import log_event, request_id, setup_logging
 from .security import is_trusted, verify_webhook
@@ -129,7 +129,8 @@ async def vapi_webhook(request: Request, background: BackgroundTasks):
         memories = memory.facts_for(caller) if trusted else []
         if home := memory.home_place(memories):
             web_tools.prefetch_weather(home)  # "what's the weather" is a likely first question
-        return {"assistant": build_assistant(s, trusted, memories=memories)}
+        lang = caller_language(caller, s)
+        return {"assistant": build_assistant(s, trusted, memories=memories, language=lang)}
 
     if kind == "tool-calls":
         ctx = tools.Ctx(call_id=call_id, caller=caller, trusted=is_trusted(caller, ctype, s))

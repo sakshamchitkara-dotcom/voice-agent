@@ -74,3 +74,33 @@ def test_transfer_call_tool_has_no_static_destination():
     assert not [t for t in build_assistant(s, trusted=False)["model"]["tools"] if t["type"] == "transferCall"]
     assert not [t for t in build_assistant(get_settings(), trusted=True)["model"]["tools"]
                 if t["type"] == "transferCall"]
+
+
+def test_caller_language_by_longest_prefix(monkeypatch):
+    from app.assistant import caller_language
+    monkeypatch.setenv("CALLER_LANGUAGES", "+34=es, +1=en, +1514=fr")
+    get_settings.cache_clear()
+    s = get_settings()
+    assert caller_language("+34911222333", s) == "es"
+    assert caller_language("+15145550100", s) == "fr"  # Montreal beats +1
+    assert caller_language("+14155550100", s) == "en" and caller_language(None, s) == "en"
+
+
+def test_spanish_caller_gets_spanish_greeting_transcriber_and_voice():
+    s = replace(get_settings(), owner_name="Sam")
+    a = build_assistant(s, trusted=True, language="es")
+    assert a["firstMessage"] == "Hola Sam, ¿en qué te puedo ayudar?"
+    assert a["transcriber"] == {"provider": "deepgram", "model": "nova-3", "language": "es"}
+    assert a["voice"] == {"provider": "azure", "voiceId": "multilingual-auto"}
+    assert "Speak Spanish on this call" in a["model"]["messages"][0]["content"]
+    assert a["metadata"]["language"] == "es"
+    english = build_assistant(s, trusted=True)
+    assert "transcriber" not in english and english["firstMessage"] == "Hey Sam, what can I do for you?"
+
+
+def test_bad_caller_languages_setting_is_rejected(monkeypatch):
+    import pytest
+    from app.config import load_settings
+    monkeypatch.setenv("CALLER_LANGUAGES", "34=klingon")
+    with pytest.raises(ValueError, match="CALLER_LANGUAGES entries look like"):
+        load_settings()
