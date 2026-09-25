@@ -37,7 +37,17 @@ caller. If they ask you to forget them, use forget_me.
 {facts}
 </memory>"""
 
-SERVER_MESSAGES = ["tool-calls", "status-update", "end-of-call-report"]
+SERVER_MESSAGES = ["tool-calls", "status-update", "end-of-call-report",
+                   "transfer-destination-request", "transfer-update"]
+
+TRANSFER_LINE = ("\n- If the caller wants to talk to {who} directly, call request_transfer (it needs their "
+                 "confirmation), then call transferCall right after it succeeds.")
+
+
+def transfer_tool() -> dict:
+    """Vapi transferCall with no destinations: Vapi asks our server.url for one at call time
+    (transfer-destination-request), which lets the server refuse unapproved transfers."""
+    return {"type": "transferCall", "destinations": []}
 
 
 def server_block(s: Settings) -> dict:
@@ -69,6 +79,9 @@ def build_assistant(s: Settings, trusted: bool, name: str = "Voice Agent",
     hey = f"Hey {s.owner_name}," if s.owner_name else "Hey,"
     prompt = SYSTEM_PROMPT.format(owner=owner, tz=s.timezone,
                                   agentic=AGENTIC_ON if trusted else AGENTIC_OFF)
+    transfer = trusted and bool(s.transfer_number)
+    if transfer:
+        prompt += TRANSFER_LINE.format(who=s.owner_name or "the owner")
     if trusted and memories:
         prompt += MEMORY_BLOCK.format(facts="\n".join(f"- {m}" for m in memories))
     assistant: dict = {
@@ -79,7 +92,7 @@ def build_assistant(s: Settings, trusted: bool, name: str = "Voice Agent",
             "provider": s.vapi_llm_provider,
             "model": s.vapi_llm_model,
             "messages": [{"role": "system", "content": prompt}],
-            "tools": tool_defs(s, trusted),
+            "tools": tool_defs(s, trusted) + ([transfer_tool()] if transfer else []),
         },
         "server": server_block(s),
         "serverMessages": SERVER_MESSAGES,

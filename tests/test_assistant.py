@@ -6,7 +6,7 @@ from app.tools import TOOLS
 
 
 def names(a):
-    return {t["function"]["name"] for t in a["model"]["tools"]}
+    return {t["function"]["name"] if "function" in t else t["type"] for t in a["model"]["tools"]}
 
 
 def test_trusted_caller_gets_all_tools():
@@ -18,7 +18,8 @@ def test_trusted_caller_gets_all_tools():
     assert tool["server"] == {"url": "https://agent.example.com/vapi/webhook", "timeoutSeconds": 20,
                               "headers": {"X-Vapi-Secret": "test-secret"}}
     assert tool["messages"][0]["type"] == "request-start"
-    assert a["serverMessages"] == ["tool-calls", "status-update", "end-of-call-report"]
+    assert a["serverMessages"] == ["tool-calls", "status-update", "end-of-call-report",
+                                   "transfer-destination-request", "transfer-update"]
 
 
 def test_untrusted_caller_gets_read_only_tools():
@@ -62,3 +63,13 @@ def test_request_transfer_only_offered_when_configured():
     assert "request_transfer" not in names(build_assistant(s, trusted=True))
     assert "request_transfer" in names(build_assistant(replace(s, transfer_number="+14155550123"), trusted=True))
     assert "request_transfer" not in names(build_assistant(replace(s, transfer_number="+14155550123"), trusted=False))
+
+
+def test_transfer_call_tool_has_no_static_destination():
+    s = replace(get_settings(), transfer_number="+14155550123", owner_name="Sam")
+    a = build_assistant(s, trusted=True)
+    assert {"type": "transferCall", "destinations": []} in a["model"]["tools"]
+    assert "talk to Sam directly, call request_transfer" in a["model"]["messages"][0]["content"]
+    assert not [t for t in build_assistant(s, trusted=False)["model"]["tools"] if t["type"] == "transferCall"]
+    assert not [t for t in build_assistant(get_settings(), trusted=True)["model"]["tools"]
+                if t["type"] == "transferCall"]

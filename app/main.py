@@ -122,6 +122,21 @@ async def vapi_webhook(request: Request, background: BackgroundTasks):
         results = await asyncio.gather(*(tools.run(tc, ctx) for tc in vapi.tool_calls(message)))
         return {"results": list(results)}
 
+    if kind == "transfer-destination-request":
+        # Only an allowlisted caller with a fresh, confirmed request_transfer gets a destination.
+        if s.transfer_number and is_trusted(caller, ctype, s) and tools.transfer_approved(call_id):
+            log_event("transfer.approved", call_id=call_id)
+            return {"destination": {"type": "number", "number": s.transfer_number,
+                                    "message": "Connecting you now."}}
+        log_event("transfer.refused", logging.WARNING, call_id=call_id, caller=caller)
+        return {"error": "Transfer not approved. Call request_transfer and get the caller's "
+                         "confirmation first."}
+
+    if kind == "transfer-update":
+        dest = message.get("destination") or {}
+        log_event("transfer.update", call_id=call_id, destination_type=dest.get("type"))
+        return {"ok": True}
+
     if kind == "status-update" and call_id:
         status = message.get("status")
         db.upsert_call(call_id, caller=caller, type=ctype, status=status,

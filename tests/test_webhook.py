@@ -150,3 +150,42 @@ def test_assistant_request_includes_caller_memory(client):
     memory.save("+14155550100", ["Their name is Priya."], "old-call", "rules")
     prompt = post(client, "assistant_request.json").json()["assistant"]["model"]["messages"][0]["content"]
     assert "- Their name is Priya." in prompt
+
+
+def test_transfer_destination_only_after_confirmed_request(client, monkeypatch):
+    from app.config import get_settings
+    from app import tools
+    monkeypatch.setenv("TRANSFER_NUMBER", "+14155550123")
+    get_settings.cache_clear()
+    assert "error" in post(client, "transfer_destination_request.json").json()
+    ask = {"message": {"type": "tool-calls", "call": {"id": "call-0001", "type": "inboundPhoneCall",
+           "customer": {"number": "+14155550100"}},
+           "toolCallList": [{"id": "t1", "name": "request_transfer", "parameters": {}}]}}
+    client.post("/vapi/webhook", json=ask, headers=AUTH)
+    assert "error" in post(client, "transfer_destination_request.json").json()  # not yet confirmed
+    ask["message"]["toolCallList"][0]["parameters"] = {"confirmed": True}
+    r = client.post("/vapi/webhook", json=ask, headers=AUTH).json()["results"][0]
+    assert r["result"].startswith("Transfer approved")
+    assert post(client, "transfer_destination_request.json").json() == {"destination": {
+        "type": "number", "number": "+14155550123", "message": "Connecting you now."}}
+    assert "error" in post(client, "transfer_destination_request.json").json()  # single use
+    assert tools.transfer_approved("call-0001") is False
+
+
+def test_transfer_refused_for_untrusted_caller_even_if_approved(client, monkeypatch):
+    from app.config import get_settings
+    from app import db as _db
+    monkeypatch.setenv("TRANSFER_NUMBER", "+14155550123")
+    get_settings.cache_clear()
+    import time
+    with _db.connect() as conn:
+        conn.execute("INSERT INTO confirmations VALUES ('call-0001', 'transfer.approved', '', ?)", (time.time(),))
+    payload = load_fixture("transfer_destination_request.json")
+    payload["message"]["customer"]["number"] = payload["message"]["call"]["customer"]["number"] = "+19995550199"
+    assert "error" in client.post("/vapi/webhook", json=payload, headers=AUTH).json()
+
+
+def test_transfer_update_is_acknowledged(client):
+    msg = {"message": {"type": "transfer-update", "call": {"id": "call-0001"},
+                       "destination": {"type": "number", "number": "+14155550123"}}}
+    assert client.post("/vapi/webhook", json=msg, headers=AUTH).json() == {"ok": True}
