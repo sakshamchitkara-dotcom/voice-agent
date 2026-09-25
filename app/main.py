@@ -14,7 +14,7 @@ from pathlib import Path
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
-from . import db, jobs, llm, memory, metrics, reminders, tools, vapi
+from . import admin, db, jobs, llm, memory, metrics, reminders, tools, vapi
 from .assistant import build_assistant
 from .config import get_settings
 from .logs import log_event, request_id, setup_logging
@@ -33,6 +33,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="voice-agent", lifespan=lifespan)
+app.include_router(admin.router)
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 

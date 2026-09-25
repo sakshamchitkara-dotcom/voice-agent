@@ -53,6 +53,9 @@ class Settings:
     transfer_number: str
     timezone: str
     owner_email: str
+    # Admin dashboard (HTTP Basic). Disabled while ADMIN_PASSWORD is empty.
+    admin_user: str
+    admin_password: str
     # Notifications. Nothing is sent unless DRY_RUN=false AND the channel is configured.
     dry_run: bool
     smtp_host: str
@@ -91,6 +94,8 @@ def load_settings() -> Settings:
         transfer_number=_e164(e("TRANSFER_NUMBER", "")),
         timezone=e("TIMEZONE", "UTC"),
         owner_email=e("OWNER_EMAIL", ""),
+        admin_user=e("ADMIN_USER", "admin"),
+        admin_password=e("ADMIN_PASSWORD", ""),
         dry_run=_bool("DRY_RUN", True),
         smtp_host=e("SMTP_HOST", ""),
         smtp_port=int(e("SMTP_PORT", "587")),
