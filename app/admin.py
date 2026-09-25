@@ -48,13 +48,15 @@ table{border-collapse:collapse;width:100%;margin:8px 0 24px}th,td{text-align:lef
 border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--mute);font-weight:600}
 td{max-width:420px;overflow-wrap:anywhere}pre{white-space:pre-wrap;background:rgba(127,127,127,.08);
 padding:12px;border-radius:6px}.mute{color:var(--mute)}.error{color:#d33}.confirm{color:#b7791f}
+.bar{display:inline-block;height:10px;background:var(--acc);border-radius:2px;vertical-align:middle}
 """
 
 
 def page(title: str, body: str) -> HTMLResponse:
     html = (f"<!doctype html><html><head><meta charset=utf-8><meta name=viewport "
             f"content='width=device-width,initial-scale=1'><title>{escape(title)} · voice-agent</title>"
-            f"<style>{CSS}</style></head><body><nav><a href='/admin'>Calls</a><a href='/admin/jobs'>Deep tasks</a>"
+            f"<style>{CSS}</style></head><body><nav><a href='/admin'>Calls</a>"
+            f"<a href='/admin/analytics'>Analytics</a><a href='/admin/jobs'>Deep tasks</a>"
             f"<a href='/admin/outbox'>Outbox</a><a href='/admin/reminders'>Reminders</a>"
             f"<a href='/admin/calendar.ics'>Calendar (.ics)</a>"
             f"<a href='/metrics'>Metrics</a></nav><h1>{escape(title)}</h1>{body}</body></html>")
@@ -148,6 +150,55 @@ async def reminders_page() -> HTMLResponse:
     return page("Reminders", table(rows, ["id", "call_id", "caller", "kind", "due_at", "status",
                                           "vapi_call_id", "message"],
                                    link={"call_id": "/admin/calls/{value}"}))
+
+
+def pct(values: list[int], p: float) -> int | None:
+    """Nearest-rank percentile of a list of ms values."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    return ordered[max(0, -(-len(ordered) * p // 100) - 1)]
+
+
+def analytics_data(days: int = 14) -> dict:
+    since = f"-{days} days"
+    per_day = q("SELECT date(COALESCE(started_at, updated_at)) AS day, COUNT(*) AS calls FROM calls "
+                "WHERE COALESCE(started_at, updated_at) >= date('now', ?) GROUP BY day ORDER BY day", since)
+    reasons = q("SELECT COALESCE(ended_reason, '(none yet)') AS ended_reason, COUNT(*) AS calls "
+                "FROM calls GROUP BY 1 ORDER BY 2 DESC")
+    tools: dict[str, dict] = {}
+    for r in q("SELECT tool, outcome, ms FROM tool_calls WHERE created_at >= date('now', ?)", since):
+        t = tools.setdefault(r["tool"], {"tool": r["tool"], "calls": 0, "ok": 0, "error": 0,
+                                         "confirm": 0, "deferred": 0, "_ms": []})
+        t["calls"] += 1
+        t[r["outcome"]] = t.get(r["outcome"], 0) + 1
+        if r["ms"] is not None:
+            t["_ms"].append(r["ms"])
+    for t in tools.values():
+        t["error_rate"] = f"{100 * t['error'] / t['calls']:.0f}%"
+        t["p50_ms"], t["p95_ms"] = pct(t["_ms"], 50), pct(t["_ms"], 95)
+    return {"per_day": [dict(r) for r in per_day], "reasons": [dict(r) for r in reasons],
+            "tools": sorted(tools.values(), key=lambda t: -t["calls"])}
+
+
+@router.get("/analytics", response_class=HTMLResponse)
+async def analytics(days: int = 14) -> HTMLResponse:
+    days = max(1, min(days, 365))
+    d = analytics_data(days)
+    peak = max((r["calls"] for r in d["per_day"]), default=1)
+    daily = "".join(f"<tr><td>{escape(r['day'] or '?')}</td><td>{r['calls']}</td><td><span class=bar "
+                    f"style='width:{max(2, round(200 * r['calls'] / peak))}px'></span></td></tr>"
+                    for r in d["per_day"])
+    daily = f"<table><tr><th>day</th><th>calls</th><th></th></tr>{daily}</table>" if daily else \
+        "<p class=mute>Nothing yet.</p>"
+    total = sum(r["calls"] for r in d["per_day"])
+    return page(f"Analytics, last {days} days", "".join([
+        f"<p>{total} call{'s' if total != 1 else ''}, "
+        f"{sum(t['calls'] for t in d['tools'])} tool calls.</p>",
+        "<h2>Calls per day</h2>", daily,
+        "<h2>Tools</h2>", table(d["tools"], ["tool", "calls", "ok", "error", "confirm", "deferred",
+                                              "error_rate", "p50_ms", "p95_ms"]),
+        "<h2>How calls ended (all time)</h2>", table(d["reasons"], ["ended_reason", "calls"])]))
 
 
 def _ics_text(value: str) -> str:

@@ -86,3 +86,20 @@ def test_calendar_ics_export(client, monkeypatch):
     assert "DTSTART:20300701T170000Z" in everything  # PDT in July
     assert all(len(line.encode()) <= 75 for line in everything.split("\r\n"))
     assert "\r\n x" in everything  # folded continuation line
+
+
+def test_analytics_page(client):
+    from app.admin import analytics_data, pct
+    db.upsert_call("a", caller="+1", started_at="2099-01-01T10:00:00Z", ended_reason="customer-ended-call")
+    db.upsert_call("b", caller="+1", started_at="2099-01-01T11:00:00Z", ended_reason="voicemail")
+    with db.connect() as conn:
+        for outcome, ms in [("ok", 100), ("ok", 300), ("error", 900), ("deferred", 1500)]:
+            conn.execute("INSERT INTO tool_calls (call_id, tool, outcome, ms) VALUES ('a', 'get_weather', ?, ?)",
+                         (outcome, ms))
+    [weather] = analytics_data()["tools"]
+    assert (weather["calls"], weather["ok"], weather["error"], weather["deferred"]) == (4, 2, 1, 1)
+    assert weather["error_rate"] == "25%" and (weather["p50_ms"], weather["p95_ms"]) == (300, 1500)
+    assert pct([], 50) is None and pct([5], 95) == 5
+    r = client.get("/admin/analytics", auth=ADMIN)
+    assert r.status_code == 200 and "Calls per day" in r.text and "2099-01-01" in r.text
+    assert "<td>voicemail</td><td>1</td>" in r.text and "class=bar" in r.text
