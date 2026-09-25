@@ -20,6 +20,19 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: pytest -q
 
+  workers:
+    # Shared state across real processes: uvicorn --workers 4 on one SQLite file (Linux).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e '.[dev]'
+      - run: python -m scripts.workers_check --workers 4
+      - run: "! python -m scripts.workers_check --workers 4 --shared-state memory"
+
   docker:
     runs-on: ubuntu-latest
     steps:
