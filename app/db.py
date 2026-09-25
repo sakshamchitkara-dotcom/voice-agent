@@ -89,6 +89,11 @@ CREATE TABLE IF NOT EXISTS reminders (
     vapi_call_id TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS rate_hits (
+    key TEXT NOT NULL,
+    ts REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS rate_hits_key ON rate_hits (key, ts);
 CREATE TABLE IF NOT EXISTS outbox (
     id INTEGER PRIMARY KEY,
     channel TEXT NOT NULL,
@@ -106,7 +111,7 @@ def connect() -> Iterator[sqlite3.Connection]:
     # ponytail: a connection per operation; fine for a single-instance voice bot.
     path = get_settings().db_path
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=10)  # wait out another worker's write lock
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -117,6 +122,8 @@ def connect() -> Iterator[sqlite3.Connection]:
 
 def init_db() -> None:
     with connect() as conn:
+        # WAL: readers don't block the writer, so several workers can share the file.
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA)
 
 

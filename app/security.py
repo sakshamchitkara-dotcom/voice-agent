@@ -7,7 +7,8 @@ import time
 from collections import defaultdict, deque
 from typing import Mapping
 
-from .config import Settings
+from . import db
+from .config import Settings, get_settings
 
 
 def verify_webhook(headers: Mapping[str, str], body: bytes, s: Settings) -> bool:
@@ -50,13 +51,18 @@ def is_trusted(caller: str | None, call_type: str | None, s: Settings) -> bool:
 class RateLimiter:
     """Sliding-window limiter keyed by caller.
 
-    ponytail: in-process memory; use Redis if you run more than one instance.
+    SHARED_STATE=memory (default): per process. SHARED_STATE=sqlite: hits live in the
+    `rate_hits` table, so every worker or instance sharing DB_PATH sees the same counts.
+    ponytail: sqlite serialises writers; fine for voice traffic, use Redis past a few hundred
+    tool calls per second.
     """
 
     def __init__(self) -> None:
         self._hits: dict[str, deque[float]] = defaultdict(deque)
 
     def allow(self, key: str, limit: int, window_s: float) -> bool:
+        if get_settings().shared_state == "sqlite":
+            return self._allow_sqlite(key, limit, window_s)
         now = time.monotonic()
         hits = self._hits[key]
         while hits and now - hits[0] > window_s:
@@ -64,6 +70,19 @@ class RateLimiter:
         if len(hits) >= limit:
             return False
         hits.append(now)
+        return True
+
+    @staticmethod
+    def _allow_sqlite(key: str, limit: int, window_s: float) -> bool:
+        now = time.time()
+        with db.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")  # count-then-insert must not interleave across workers
+            # Also drop anything older than the longest window (1h), so idle keys don't pile up.
+            conn.execute("DELETE FROM rate_hits WHERE (key = ? AND ts <= ?) OR ts <= ?",
+                         (key, now - window_s, now - 3600))
+            if conn.execute("SELECT COUNT(*) FROM rate_hits WHERE key = ?", (key,)).fetchone()[0] >= limit:
+                return False
+            conn.execute("INSERT INTO rate_hits (key, ts) VALUES (?, ?)", (key, now))
         return True
 
 

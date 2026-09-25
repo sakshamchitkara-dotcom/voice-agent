@@ -50,3 +50,21 @@ def test_rate_limiter_window():
     assert all(rl.allow("a", 2, 60) for _ in range(2))
     assert not rl.allow("a", 2, 60)
     assert rl.allow("b", 2, 60)
+
+
+def test_sqlite_rate_limiter_is_shared_between_instances(monkeypatch):
+    monkeypatch.setenv("SHARED_STATE", "sqlite")
+    get_settings.cache_clear()
+    worker_a, worker_b = RateLimiter(), RateLimiter()  # stand-ins for two processes
+    assert worker_a.allow("tools:+1", 2, 60) and worker_b.allow("tools:+1", 2, 60)
+    assert not worker_a.allow("tools:+1", 2, 60) and not worker_b.allow("tools:+1", 2, 60)
+    assert worker_b.allow("tools:+2", 2, 60)
+    assert not worker_a._hits  # nothing kept in process memory
+
+
+def test_shared_state_setting_is_validated(monkeypatch):
+    import pytest
+    from app.config import load_settings
+    monkeypatch.setenv("SHARED_STATE", "redis")
+    with pytest.raises(ValueError, match="SHARED_STATE must be one of memory, sqlite"):
+        load_settings()

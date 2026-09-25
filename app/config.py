@@ -22,6 +22,13 @@ def _e164(value: str) -> str:
     return value
 
 
+def _choice(name: str, default: str, options: tuple[str, ...]) -> str:
+    value = os.getenv(name, default).strip().lower() or default
+    if value not in options:
+        raise ValueError(f"{name} must be one of {', '.join(options)}, got {value!r}")
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     public_url: str
@@ -31,6 +38,8 @@ class Settings:
     hmac_header: str
     allow_unauthenticated: bool
     db_path: str
+    # "memory" (per process) or "sqlite" (rate limits and tool caches shared via DB_PATH).
+    shared_state: str
     # Callers (E.164) allowed to use side-effecting / private tools.
     allowed_callers: tuple[str, ...]
     allow_web_agentic: bool
@@ -83,6 +92,7 @@ def load_settings() -> Settings:
         hmac_header=e("VAPI_HMAC_HEADER", "x-vapi-signature").lower(),
         allow_unauthenticated=_bool("ALLOW_UNAUTHENTICATED"),
         db_path=e("DB_PATH", "data/voice_agent.db"),
+        shared_state=_choice("SHARED_STATE", "memory", ("memory", "sqlite")),
         allowed_callers=_list("ALLOWED_CALLERS"),
         allow_web_agentic=_bool("ALLOW_WEB_AGENTIC"),
         rate_limit_per_minute=int(e("RATE_LIMIT_PER_MINUTE", "20")),
