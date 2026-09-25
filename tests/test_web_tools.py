@@ -146,3 +146,26 @@ async def test_wikipedia_lookup(mock_http):
         "From Wikipedia, Ada Lovelace: Augusta Ada King, Countess of Lovelace, was an English mathematician.")
     assert params[0]["generator"] == "search" and params[0]["exintro"] == "1"
     assert await web_tools.wikipedia("zzqx") == "Wikipedia has no article matching zzqx."
+
+
+async def test_ttl_cache_single_flight_under_concurrency():
+    import asyncio
+    calls = []
+    gate = asyncio.Event()
+
+    @web_tools.ttl_cache(60)
+    async def slow(q):
+        calls.append(q)
+        await gate.wait()
+        if q == "bad":
+            raise RuntimeError("429")
+        return q.upper()
+
+    tasks = [asyncio.create_task(slow("London")) for _ in range(20)]
+    bad = [asyncio.create_task(slow("bad")) for _ in range(3)]
+    await asyncio.sleep(0)
+    gate.set()
+    assert await asyncio.gather(*tasks) == ["LONDON"] * 20
+    results = await asyncio.gather(*bad, return_exceptions=True)
+    assert all(isinstance(r, RuntimeError) for r in results)
+    assert calls == ["London", "bad"]  # one upstream call per key

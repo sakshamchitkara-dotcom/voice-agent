@@ -28,11 +28,14 @@ def ttl_cache(seconds: float, maxsize: int = 256):
     """Cache an async function's successful results by its (normalised) string args.
 
     Voice tools must answer in well under a second; repeat questions within a call or
-    across callers ("weather in Paris") should not hit the upstream API again.
+    across callers ("weather in Paris") should not hit the upstream API again. Concurrent
+    misses for the same key share one upstream request (single-flight), so a burst of
+    identical questions can't stampede the API into rate limiting us.
     ponytail: per-process dict with FIFO eviction; move to Redis for several instances.
     """
     def deco(fn):
         store: dict[tuple, tuple[float, object]] = {}
+        inflight: dict[tuple, asyncio.Future] = {}
         _caches.append(store)
 
         @functools.wraps(fn)
@@ -42,8 +45,20 @@ def ttl_cache(seconds: float, maxsize: int = 256):
             if hit and hit[0] > time.monotonic():
                 cache_lookups.inc(cache=fn.__name__, result="hit")
                 return hit[1]
+            if key in inflight:
+                cache_lookups.inc(cache=fn.__name__, result="shared")
+                return await asyncio.shield(inflight[key])
             cache_lookups.inc(cache=fn.__name__, result="miss")
-            value = await fn(*args)  # exceptions are not cached
+            fut = inflight[key] = asyncio.get_running_loop().create_future()
+            try:
+                value = await fn(*args)  # exceptions are not cached
+            except BaseException as e:
+                fut.set_exception(e)
+                fut.exception()  # mark retrieved: no "never retrieved" warning if unshared
+                raise
+            finally:
+                inflight.pop(key, None)
+            fut.set_result(value)
             if len(store) >= maxsize:
                 store.pop(next(iter(store)))
             store[key] = (time.monotonic() + seconds, value)
