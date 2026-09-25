@@ -168,6 +168,8 @@ async def vapi_webhook(request: Request, background: BackgroundTasks):
             ended_reason=message.get("endedReason"), transcript=transcript, summary=summary,
             started_at=message.get("startedAt"), ended_at=message.get("endedAt"),
         )
+        if ctype == "outboundPhoneCall":  # maybe one of our reminder callbacks
+            background.add_task(reminders.on_callback_ended, call_id, message.get("endedReason"))
         if transcript and not summary:
             background.add_task(summarize_call, call_id, transcript)
         if caller and is_trusted(caller, ctype, s):

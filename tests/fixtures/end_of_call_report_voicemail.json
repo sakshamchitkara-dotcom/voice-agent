@@ -1,0 +1,24 @@
+{
+  "message": {
+    "type": "end-of-call-report",
+    "timestamp": 1790460041000,
+    "endedReason": "voicemail",
+    "startedAt": "2026-09-26T22:00:02.000Z",
+    "endedAt": "2026-09-26T22:00:41.000Z",
+    "call": {
+      "id": "vapi-call-9",
+      "orgId": "org-123",
+      "type": "outboundPhoneCall",
+      "phoneNumberId": "pn-123",
+      "customer": {"number": "+14155550100"}
+    },
+    "customer": {"number": "+14155550100"},
+    "analysis": {"summary": "The call reached voicemail and the reminder was left as a message."},
+    "artifact": {
+      "transcript": "AI: Hi, it's your assistant with the reminder you asked for: call the dentist. I'll text it to you as well.",
+      "messages": [
+        {"role": "bot", "message": "Hi, it's your assistant with the reminder you asked for: call the dentist. I'll text it to you as well."}
+      ]
+    }
+  }
+}

@@ -98,3 +98,42 @@ async def test_dispatcher_sends_due_sms_once_via_outbox():
             [("due", "dry-run"), ("later", "pending")]
         assert tuple(conn.execute("SELECT recipient, body, status FROM outbox").fetchone()) == \
             ("+14155550100", "Reminder: due", "dry-run")
+
+
+def test_callback_payload_leaves_voicemail():
+    body = reminders.callback_payload(get_settings(), "+14155550100",
+                                      datetime.now(timezone.utc) + timedelta(hours=1), "call the dentist")
+    a = body["assistant"]
+    assert a["voicemailDetection"] == {"provider": "vapi", "type": "audio"}
+    assert a["voicemailMessage"].startswith("Hi, it's your assistant with the reminder you asked for: "
+                                            "call the dentist.")
+
+
+def _scheduled(vapi_call_id="vapi-call-9"):
+    with db.connect() as conn:
+        conn.execute("INSERT INTO reminders (call_id, caller, kind, due_at, message, status, vapi_call_id) "
+                     "VALUES ('call-1', '+14155550100', 'call', '2026-09-26T22:00:00+00:00', "
+                     "'call the dentist', 'scheduled', ?)", (vapi_call_id,))
+
+
+def test_voicemail_report_texts_the_reminder_once():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from tests.conftest import load_fixture
+    _scheduled()
+    report = load_fixture("end_of_call_report_voicemail.json")
+    with TestClient(app) as c:
+        for _ in range(2):  # Vapi may redeliver a webhook
+            assert c.post("/vapi/webhook", json=report, headers={"X-Vapi-Secret": "test-secret"}).json() == {"ok": True}
+    assert rows()[0]["status"] == "voicemail"
+    with db.connect() as conn:
+        sms = [dict(r) for r in conn.execute("SELECT channel, recipient, body, status FROM outbox")]
+    assert sms == [{"channel": "sms", "recipient": "+14155550100", "status": "dry-run",
+                    "body": "Reminder (also left on your voicemail): call the dentist"}]
+
+
+async def test_answered_callback_is_marked_completed():
+    _scheduled()
+    assert await reminders.on_callback_ended("vapi-call-9", "customer-ended-call") == "completed"
+    assert await reminders.on_callback_ended("vapi-call-9", "voicemail") is None
+    assert await reminders.on_callback_ended("unknown", "voicemail") is None

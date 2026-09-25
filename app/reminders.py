@@ -49,6 +49,11 @@ def callback_payload(s: Settings, to: str, when: datetime, message: str) -> dict
 
     assistant = build_assistant(s, trusted=True, name="Reminder callback")
     assistant["firstMessage"] = f"Hi, it's your assistant with the reminder you asked for: {message}"
+    # If the callback reaches voicemail, leave the reminder after the beep (Vapi's default
+    # 30s beep wait). The end-of-call-report then has endedReason "voicemail" and we also text it.
+    assistant["voicemailDetection"] = {"provider": "vapi", "type": "audio"}
+    assistant["voicemailMessage"] = (f"Hi, it's your assistant with the reminder you asked for: "
+                                     f"{message}. I'll text it to you as well.")[:1000]
     return {
         "name": f"Reminder: {message}"[:40],
         "phoneNumberId": s.vapi_phone_number_id,
@@ -90,6 +95,28 @@ async def schedule(call_id: str | None, caller: str, kind: str, when: datetime, 
         ).lastrowid
     log_event("reminder.created", reminder_id=rid, kind=kind, status=status)
     return rid, status
+
+
+async def on_callback_ended(vapi_call_id: str | None, ended_reason: str | None) -> str | None:
+    """end-of-call-report for one of our scheduled callbacks: record how it went, and if it hit
+    voicemail, text the reminder too. Claimed atomically, so a repeated report sends nothing."""
+    if not vapi_call_id:
+        return None
+    status = "voicemail" if ended_reason == "voicemail" else "completed"
+    with db.connect() as conn:
+        r = conn.execute("SELECT * FROM reminders WHERE vapi_call_id = ? AND kind = 'call'",
+                         (vapi_call_id,)).fetchone()
+        if r is None or not conn.execute("UPDATE reminders SET status = ? WHERE id = ? AND status = "
+                                         "'scheduled'", (status, r["id"])).rowcount:
+            return None
+    log_event("reminder.callback_ended", reminder_id=r["id"], status=status, ended_reason=ended_reason)
+    if status == "voicemail":
+        try:
+            await notify.send("sms", r["caller"], "Reminder", f"Reminder (also left on your voicemail): "
+                                                              f"{r['message']}")
+        except Exception as e:
+            log_event("reminder.voicemail_sms_failed", logging.ERROR, reminder_id=r["id"], error=str(e))
+    return status
 
 
 async def dispatch_due(now: datetime | None = None) -> int:
