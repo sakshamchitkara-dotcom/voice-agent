@@ -16,6 +16,7 @@ def test_rule_facts():
     lines = [
         "Hi, my name is dana lee and I live in Oakland, near the lake.",
         "My dog's name is biscuit. My favourite coffee is a flat white!",
+        "Remember my sister is visiting me next week.",
         "I'm allergic to peanuts; remember that I have a dentist appointment on Friday.",
         "What's the weather like?",
     ]
@@ -24,8 +25,9 @@ def test_rule_facts():
         "They live in Oakland, near the lake.",
         "Their dog is Biscuit.",
         "Their favourite coffee is a flat white.",
+        "They asked you to remember: their sister is visiting them next week.",
         "They are allergic to peanuts.",
-        "They asked you to remember: I have a dentist appointment on Friday.",
+        "They asked you to remember: they have a dentist appointment on Friday.",
     ]
 
 

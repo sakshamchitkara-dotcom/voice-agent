@@ -24,8 +24,9 @@ RULES: list[tuple[re.Pattern, str, bool]] = [(re.compile(p, re.I), t, title) for
     (r"\bi live in " + _END, "They live in {0}.", False),
     (r"\bi(?:'m| am) (?:based|located) in " + _END, "They are based in {0}.", False),
     (r"\bi work (?:at|for) " + _END, "They work at {0}.", False),
-    (r"\bmy (wife|husband|partner|son|daughter|mom|mum|dad|brother|sister|boss|dog|cat)(?:'s name)? is "
-     r"(?:called |named )?([a-z][a-z'-]+)", "Their {0} is {1}.", True),
+    # Needs "'s name is" / "is called" / "is named": "my sister is visiting" is not a name.
+    (r"\bmy (wife|husband|partner|son|daughter|mom|mum|dad|brother|sister|boss|dog|cat)"
+     r"(?:'s name is| is called| is named) ([a-z][a-z'-]+)", "Their {0} is {1}.", True),
     (r"\bmy favou?rite ([a-z]+(?: [a-z]+)?) is " + _END, "Their favourite {0} is {1}.", False),
     (r"\bi prefer " + _END, "They prefer {0}.", False),
     (r"\bi(?:'m| am) allergic to " + _END, "They are allergic to {0}.", False),
@@ -47,9 +48,17 @@ def user_lines(message: dict) -> list[str]:
             if parts[i] == "User" and parts[i + 1].strip()]
 
 
+# First person -> third person, so "remember that my passport..." reads "their passport".
+_PRONOUNS = [(r"\bI am\b|\bI'm\b", "they're"), (r"\bI\b", "they"), (r"\bmy\b", "their"),
+             (r"\bme\b", "them"), (r"\bmine\b", "theirs"), (r"\bmyself\b", "themselves")]
+
+
 def _clean(value: str) -> str:
     value = " ".join(value.split()).strip(" ,'\"")
-    return re.sub(r"\s+(?:and|but|so|because)$", "", value, flags=re.I)
+    value = re.sub(r"\s+(?:and|but|so|because)$", "", value, flags=re.I)
+    for pattern, repl in _PRONOUNS:
+        value = re.sub(pattern, repl, value, flags=re.I)
+    return value
 
 
 def rule_facts(lines: list[str]) -> list[str]:
