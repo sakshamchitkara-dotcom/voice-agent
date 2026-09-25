@@ -3,6 +3,7 @@ reminders, outbox."""
 from __future__ import annotations
 
 import sqlite3
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -125,11 +126,21 @@ def connect() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def init_db() -> None:
-    with connect() as conn:
-        # WAL: readers don't block the writer, so several workers can share the file.
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.executescript(SCHEMA)
+def init_db(wait_s: float = 10) -> None:
+    """Create the schema. Retries while another worker holds the lock: the switch to WAL skips
+    SQLite's busy timeout, so uvicorn --workers N starting on a fresh file used to crash."""
+    deadline = time.monotonic() + wait_s
+    while True:
+        try:
+            with connect() as conn:
+                # WAL: readers don't block the writer, so several workers can share the file.
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.executescript(SCHEMA)
+            return
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) or time.monotonic() > deadline:
+                raise
+            time.sleep(0.05)
 
 
 def upsert_call(call_id: str, **fields) -> None:
