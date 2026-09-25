@@ -17,3 +17,8 @@ def test_payloads_parse_as_vapi_tool_calls_for_real_read_only_tools():
         (call,) = vapi.tool_calls(msg)
         assert call.name == tool and call.args == samples[0] and call.id.startswith("call_")
         assert vapi.caller_number(msg) == "+15550000007"
+
+
+def test_cold_cities_are_all_distinct():
+    assert len(loadtest.COLD_CITIES) >= 80
+    assert len({c.lower() for c in loadtest.COLD_CITIES}) == len(loadtest.COLD_CITIES)

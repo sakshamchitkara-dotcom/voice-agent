@@ -2,7 +2,10 @@
 tool latency is a second of dead air on the call.
 
   VAPI_WEBHOOK_SECRET=... python -m scripts.loadtest [--url http://localhost:8000] \\
-      [--tool get_weather] [-n 200] [-c 20] [--max-p95 1.5]
+      [--tool get_weather] [-n 200] [-c 20] [--max-p95 1.5] [--cold]
+
+--cold asks for the weather in a different city on every request (up to len(COLD_CITIES)),
+so every request is an uncached lookup: the worst case a caller can hit.
 
 Each request is a realistic Vapi `tool-calls` message with a unique toolCallId. Callers are
 spread over many fake, non-allowlisted numbers so the per-caller rate limit doesn't skew
@@ -33,6 +36,19 @@ SAMPLE_ARGS = {
 }
 
 
+COLD_CITIES = (
+    "Accra;Addis Ababa;Almaty;Amman;Amsterdam;Ankara;Asuncion;Athens;Baku;Bamako;Bangkok;"
+    "Beirut;Belgrade;Berlin;Bern;Bogota;Brasilia;Bratislava;Brussels;Bucharest;Budapest;"
+    "Buenos Aires;Cairo;Canberra;Caracas;Colombo;Copenhagen;Dakar;Dhaka;Doha;Dublin;Hanoi;"
+    "Harare;Havana;Helsinki;Islamabad;Jakarta;Kabul;Kampala;Kathmandu;Khartoum;Kigali;Kyiv;"
+    "La Paz;Lima;Lisbon;Ljubljana;Luanda;Lusaka;Madrid;Managua;Manila;Maputo;Minsk;Montevideo;"
+    "Muscat;Nairobi;Oslo;Ottawa;Panama City;Paramaribo;Phnom Penh;Prague;Quito;Rabat;Reykjavik;"
+    "Riga;Riyadh;Rome;Santiago;Sarajevo;Seoul;Skopje;Sofia;Stockholm;Taipei;Tallinn;Tashkent;"
+    "Tbilisi;Tegucigalpa;Tirana;Tunis;Ulaanbaatar;Valletta;Vienna;Vilnius;Warsaw;Wellington;"
+    "Windhoek;Yerevan;Zagreb"
+).split(";")
+
+
 def payload(tool: str, args: dict, i: int) -> dict:
     return {"message": {
         "timestamp": int(time.time() * 1000),
@@ -49,11 +65,13 @@ def pct(sorted_values: list[float], p: float) -> float:
     return sorted_values[max(0, math.ceil(p / 100 * len(sorted_values)) - 1)]
 
 
-async def run(url: str, secret: str, tool: str, n: int, concurrency: int) -> tuple[list[float], list[str]]:
+async def run(url: str, secret: str, tool: str, n: int, concurrency: int,
+              cold: bool = False) -> tuple[list[float], list[str], int]:
     sem = asyncio.Semaphore(concurrency)
     latencies: list[float] = []
     errors: list[str] = []
-    samples = SAMPLE_ARGS[tool]
+    deferred = 0
+    samples = [{"location": c} for c in COLD_CITIES] if cold else SAMPLE_ARGS[tool]
 
     async with httpx.AsyncClient(timeout=25, headers={"X-Vapi-Secret": secret}) as client:
         async def one(i: int) -> None:
@@ -68,9 +86,12 @@ async def run(url: str, secret: str, tool: str, n: int, concurrency: int) -> tup
                 latencies.append(elapsed)
                 if "error" in result:
                     errors.append(str(result["error"])[:120])
+                elif str(result.get("result", "")).startswith("STILL WORKING"):
+                    nonlocal deferred
+                    deferred += 1
 
         await asyncio.gather(*(one(i) for i in range(n)))
-    return latencies, errors
+    return latencies, errors, deferred
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -80,22 +101,26 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-n", type=int, default=200, help="total requests")
     p.add_argument("-c", type=int, default=20, help="concurrency")
     p.add_argument("--max-p95", type=float, default=1.5, help="latency budget in seconds")
+    p.add_argument("--cold", action="store_true", help="a new city per request (get_weather only)")
     a = p.parse_args(argv)
+    if a.cold:
+        a.tool, a.n = "get_weather", min(a.n, len(COLD_CITIES))
     secret = os.getenv("VAPI_WEBHOOK_SECRET")
     if not secret:
         sys.exit("Set VAPI_WEBHOOK_SECRET to the server's secret.")
 
     t0 = time.perf_counter()
-    lat, errors = asyncio.run(run(a.url.rstrip("/"), secret, a.tool, a.n, a.c))
+    lat, errors, deferred = asyncio.run(run(a.url.rstrip("/"), secret, a.tool, a.n, a.c, a.cold))
     wall = time.perf_counter() - t0
     s = sorted(lat)
 
     def ms(x: float) -> str:
         return f"{x * 1000:.0f}ms"
-    print(f"{a.tool}: {len(lat)} requests, concurrency {a.c}, {wall:.1f}s, {len(lat) / wall:.1f} req/s")
+    print(f"{a.tool}{' (cold)' if a.cold else ''}: {len(lat)} requests, concurrency {a.c}, {wall:.1f}s, {len(lat) / wall:.1f} req/s")
     print(f"latency min {ms(s[0])}  p50 {ms(statistics.median(s))}  p95 {ms(pct(s, 95))}  "
           f"p99 {ms(pct(s, 99))}  max {ms(s[-1])}")
-    print(f"errors: {len(errors)}" + (f" (first: {errors[0]})" if errors else ""))
+    print(f"errors: {len(errors)}" + (f" (first: {errors[0]})" if errors else "")
+          + f"  deferred (holding line): {deferred}")
     ok = not errors and pct(s, 95) <= a.max_p95
     print("PASS" if ok else f"FAIL (budget p95 <= {ms(a.max_p95)}, no errors)")
     return 0 if ok else 1
