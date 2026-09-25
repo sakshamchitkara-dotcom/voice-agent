@@ -169,3 +169,10 @@ async def test_ttl_cache_single_flight_under_concurrency():
     results = await asyncio.gather(*bad, return_exceptions=True)
     assert all(isinstance(r, RuntimeError) for r in results)
     assert calls == ["London", "bad"]  # one upstream call per key
+
+
+async def test_lookups_share_one_keepalive_client():
+    a = web_tools.http()
+    assert web_tools.http() is a  # reused: no new TCP/TLS handshake per request
+    await web_tools.close_http()
+    assert web_tools.http() is not a

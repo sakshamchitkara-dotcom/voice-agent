@@ -22,6 +22,28 @@ TIMEOUT = httpx.Timeout(8.0, connect=4.0)
 cache_lookups = metrics.Counter("voice_agent_cache_lookups_total", "Tool cache lookups.",
                                 ("cache", "result"))
 _caches: list[dict] = []
+_client: tuple[asyncio.AbstractEventLoop, httpx.AsyncClient] | None = None
+
+
+def http() -> httpx.AsyncClient:
+    """One keep-alive client per event loop, shared by every lookup tool.
+
+    A fresh client per request paid a TCP+TLS handshake to each upstream host every time:
+    a cold weather lookup (geocode + forecast) took ~2s, and ~0.5s on a reused connection.
+    """
+    global _client
+    loop = asyncio.get_running_loop()
+    if _client is None or _client[0] is not loop or _client[1].is_closed:
+        _client = (loop, httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": UA},
+                                           limits=httpx.Limits(max_keepalive_connections=20)))
+    return _client[1]
+
+
+async def close_http() -> None:
+    global _client
+    if _client is not None:
+        await _client[1].aclose()
+        _client = None
 
 
 def ttl_cache(seconds: float, maxsize: int = 256):
@@ -68,8 +90,11 @@ def ttl_cache(seconds: float, maxsize: int = 256):
 
 
 def clear_caches() -> None:
+    """Tests: drop cached values and the shared client (it may belong to a closed loop)."""
+    global _client
     for store in _caches:
         store.clear()
+    _client = None
 
 
 # WMO weather interpretation codes used by Open-Meteo.
@@ -86,29 +111,29 @@ WMO = {
 
 @ttl_cache(600)
 async def get_weather(location: str) -> str:
-    async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": UA}) as client:
-        geo = await client.get(
-            "https://geocoding-api.open-meteo.com/v1/search",
-            params={"name": location, "count": 1, "language": "en", "format": "json"},
-        )
-        geo.raise_for_status()
-        places = geo.json().get("results") or []
-        if not places:
-            return f"I couldn't find a place called {location}."
-        p = places[0]
-        wx = await client.get(
-            "https://api.open-meteo.com/v1/forecast",
-            params={
-                "latitude": p["latitude"],
-                "longitude": p["longitude"],
-                "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m",
-                "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max",
-                "forecast_days": 1,
-                "timezone": "auto",
-            },
-        )
-        wx.raise_for_status()
-        d = wx.json()
+    client = http()
+    geo = await client.get(
+        "https://geocoding-api.open-meteo.com/v1/search",
+        params={"name": location, "count": 1, "language": "en", "format": "json"},
+    )
+    geo.raise_for_status()
+    places = geo.json().get("results") or []
+    if not places:
+        return f"I couldn't find a place called {location}."
+    p = places[0]
+    wx = await client.get(
+        "https://api.open-meteo.com/v1/forecast",
+        params={
+            "latitude": p["latitude"],
+            "longitude": p["longitude"],
+            "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m",
+            "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+            "forecast_days": 1,
+            "timezone": "auto",
+        },
+    )
+    wx.raise_for_status()
+    d = wx.json()
     cur, day = d["current"], d["daily"]
     name = ", ".join(x for x in (p.get("name"), p.get("admin1"), p.get("country")) if x)
     rain = day["precipitation_probability_max"][0]
@@ -153,11 +178,10 @@ def parse_ddg(page: str, limit: int = 5) -> list[dict]:
 
 @ttl_cache(300)
 async def search(query: str, limit: int = 5) -> list[dict]:
-    async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": UA}) as client:
-        r = await client.post("https://html.duckduckgo.com/html/", data={"q": query})
-        r.raise_for_status()
-        if r.status_code == 202:  # DDG's bot challenge page
-            raise RuntimeError("search provider is rate limiting us, try again shortly")
+    r = await http().post("https://html.duckduckgo.com/html/", data={"q": query})
+    r.raise_for_status()
+    if r.status_code == 202:  # DDG's bot challenge page
+        raise RuntimeError("search provider is rate limiting us, try again shortly")
     return parse_ddg(r.text, limit)
 
 
@@ -189,9 +213,8 @@ def parse_rss(xml: str) -> list[dict]:
 
 @ttl_cache(300)
 async def _feed(topic: str) -> list[dict]:
-    async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": UA}) as client:
-        r = await client.get(NEWS_FEEDS[topic])
-        r.raise_for_status()
+    r = await http().get(NEWS_FEEDS[topic])
+    r.raise_for_status()
     return parse_rss(r.text)
 
 
@@ -213,13 +236,12 @@ async def headlines(topic: str = "top", query: str = "", limit: int = 5) -> str:
 @ttl_cache(3600)
 async def wikipedia(topic: str) -> str:
     """Intro of the best-matching English Wikipedia article (MediaWiki action API)."""
-    async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": UA}) as client:
-        r = await client.get("https://en.wikipedia.org/w/api.php", params={
-            "action": "query", "format": "json", "formatversion": 2, "redirects": 1,
-            "generator": "search", "gsrsearch": topic, "gsrlimit": 1,
-            "prop": "extracts", "exintro": 1, "explaintext": 1, "exsentences": 4,
-        })
-        r.raise_for_status()
+    r = await http().get("https://en.wikipedia.org/w/api.php", params={
+        "action": "query", "format": "json", "formatversion": 2, "redirects": 1,
+        "generator": "search", "gsrsearch": topic, "gsrlimit": 1,
+        "prop": "extracts", "exintro": 1, "explaintext": 1, "exsentences": 4,
+    })
+    r.raise_for_status()
     pages = (r.json().get("query") or {}).get("pages") or []
     if not pages or not pages[0].get("extract"):
         return f"Wikipedia has no article matching {topic}."
@@ -254,17 +276,17 @@ def html_to_text(page: str) -> str:
 
 async def fetch_text(url: str, max_bytes: int = 2_000_000) -> tuple[str, str]:
     """Return (final_url, text). Follows up to 3 redirects, re-validating each hop."""
-    async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": UA}) as client:
-        for _ in range(4):
-            await _assert_public(url)
-            r = await client.get(url)
-            if r.is_redirect and "location" in r.headers:
-                url = str(r.url.join(r.headers["location"]))
-                continue
-            r.raise_for_status()
-            break
-        else:
-            raise ValueError("too many redirects")
+    client = http()
+    for _ in range(4):
+        await _assert_public(url)
+        r = await client.get(url)
+        if r.is_redirect and "location" in r.headers:
+            url = str(r.url.join(r.headers["location"]))
+            continue
+        r.raise_for_status()
+        break
+    else:
+        raise ValueError("too many redirects")
     body = r.content[:max_bytes].decode(r.encoding or "utf-8", errors="replace")
     ctype = r.headers.get("content-type", "")
     return url, (html_to_text(body) if "html" in ctype or "<html" in body[:500].lower() else body)

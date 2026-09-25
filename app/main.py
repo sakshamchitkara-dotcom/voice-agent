@@ -14,7 +14,7 @@ from pathlib import Path
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
-from . import admin, db, jobs, llm, memory, metrics, reminders, tools, vapi
+from . import admin, db, jobs, llm, memory, metrics, reminders, tools, vapi, web_tools
 from .assistant import build_assistant
 from .config import get_settings
 from .logs import log_event, request_id, setup_logging
@@ -30,6 +30,7 @@ async def lifespan(app: FastAPI):
     log_event("server.started", public_url=get_settings().public_url)
     yield
     dispatcher.cancel()
+    await web_tools.close_http()
 
 
 app = FastAPI(title="voice-agent", version="0.2.0", lifespan=lifespan)

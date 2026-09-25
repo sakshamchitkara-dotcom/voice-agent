@@ -5,7 +5,7 @@ import re
 
 import httpx
 
-from .web_tools import TIMEOUT, UA, ttl_cache
+from .web_tools import http, ttl_cache
 
 FRANKFURTER = "https://api.frankfurter.dev/v1/latest"
 
@@ -87,8 +87,7 @@ def fmt(x: float) -> str:
 async def fx_rate(base: str, quote: str) -> tuple[float, str]:
     if base == quote:
         return 1.0, "today"
-    async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": UA}) as client:
-        r = await client.get(FRANKFURTER, params={"base": base, "symbols": quote})
+    r = await http().get(FRANKFURTER, params={"base": base, "symbols": quote})
     if r.status_code == 404:
         raise ValueError(f"I don't have exchange rates for {base} to {quote}. "
                          "I cover about 30 major currencies.")
