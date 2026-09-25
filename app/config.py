@@ -35,6 +35,8 @@ class Settings:
     allowed_callers: tuple[str, ...]
     allow_web_agentic: bool
     rate_limit_per_minute: int
+    # Cached lookups slower than this answer with a holding line and finish in the background.
+    tool_soft_deadline_s: float
     deep_tasks_per_hour: int
     # Claude reasoning backend for tools and deep tasks.
     claude_model: str
@@ -80,6 +82,7 @@ def load_settings() -> Settings:
         allowed_callers=_list("ALLOWED_CALLERS"),
         allow_web_agentic=_bool("ALLOW_WEB_AGENTIC"),
         rate_limit_per_minute=int(e("RATE_LIMIT_PER_MINUTE", "20")),
+        tool_soft_deadline_s=float(e("TOOL_SOFT_DEADLINE_S", "1.5")),
         deep_tasks_per_hour=int(e("DEEP_TASKS_PER_HOUR", "3")),
         claude_model=e("CLAUDE_MODEL", "claude-opus-5-5"),
         claude_fallback_model=e("CLAUDE_FALLBACK_MODEL", "claude-opus-5"),

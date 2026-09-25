@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from app import db, tools
+from app.config import get_settings
 from app.security import limiter
 from app.vapi import ToolCall
 
@@ -98,9 +99,30 @@ async def test_slow_tool_times_out(monkeypatch):
     async def slow(a, ctx):
         await asyncio.sleep(1)
     monkeypatch.setattr(tools, "TOOL_TIMEOUT_S", 0.01)
-    monkeypatch.setattr(tools.TOOLS["get_weather"], "handler", slow)
-    r = await tools.run(tc("get_weather", location="x"), TRUSTED)
+    monkeypatch.setattr(tools.TOOLS["list_notes"], "handler", slow)
+    r = await tools.run(tc("list_notes"), TRUSTED)
     assert "took too long" in r["error"]
+
+
+async def test_slow_lookup_defers_then_retry_hits_warm_cache(monkeypatch):
+    from app import metrics, web_tools
+    monkeypatch.setenv("TOOL_SOFT_DEADLINE_S", "0.05")
+    get_settings.cache_clear()
+    upstream = []
+
+    @web_tools.ttl_cache(60)
+    async def slow_weather(location):
+        upstream.append(location)
+        await asyncio.sleep(0.2)
+        return f"{location}: sunny."
+    monkeypatch.setattr(web_tools, "get_weather", slow_weather)
+    metrics.reset()
+    first = await tools.run(tc("get_weather", location="Oslo"), TRUSTED)
+    assert first["result"].startswith("STILL WORKING") and "call get_weather again" in first["result"]
+    await asyncio.sleep(0.3)  # background lookup finishes and fills the cache
+    second = await tools.run(tc("get_weather", location="Oslo"), TRUSTED)
+    assert second["result"] == "Oslo: sunny." and upstream == ["Oslo"]
+    assert 'voice_agent_tool_calls_total{tool="get_weather",outcome="deferred"} 1' in metrics.render()
 
 
 async def test_deep_task_queues_after_confirmation(monkeypatch):

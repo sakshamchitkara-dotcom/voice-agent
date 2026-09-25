@@ -66,7 +66,10 @@ def tool_defs(s: Settings, trusted: bool) -> list[dict]:
             "type": "function",
             "function": {"name": t.name, "description": t.description, "parameters": t.schema()},
             "server": server,
-            "messages": [{"type": "request-start", "content": t.spoken_start}],
+            "messages": [{"type": "request-start", "content": t.spoken_start},
+                         # Vapi speaks this if our response takes longer than timingMilliseconds.
+                         {"type": "request-response-delayed", "content": "Still on it, one moment.",
+                          "timingMilliseconds": 1000}],
         }
         for t in TOOLS.values()
         if (trusted or not t.agentic) and t.enabled(s)

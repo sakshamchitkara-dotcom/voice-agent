@@ -22,6 +22,8 @@ from .security import limiter
 
 CONFIRM_TTL_S = 300
 TOOL_TIMEOUT_S = 18  # Vapi's default server timeout is 20s
+STILL_WORKING = "STILL WORKING"
+_background: set[asyncio.Task] = set()
 
 
 @dataclass
@@ -49,6 +51,9 @@ class Tool:
     confirm: Callable[[dict, Ctx], str] | None = None  # describes the action to confirm
     spoken_start: str = "One moment."
     enabled: Callable[[Any], bool] = lambda s: True  # offered to the model only if true
+    # Cached lookup: past TOOL_SOFT_DEADLINE_S the caller hears a holding line, the lookup
+    # finishes in the background, and the model's retry is answered from the warm cache.
+    deferrable: bool = False
 
     def schema(self) -> dict:
         props = dict(self.properties)
@@ -245,16 +250,18 @@ EMAIL = {"type": "string", "description": "Email address (only for channel=email
 TOOLS: dict[str, Tool] = {t.name: t for t in [
     Tool("get_weather", "Get current weather and today's forecast for a place.",
          {"location": {"type": "string", "description": "City or place name"}},
-         ["location"], _weather, spoken_start="Checking the weather."),
+         ["location"], _weather, deferrable=True, spoken_start="Checking the weather."),
     Tool("web_search", "Search the web and return the top results with snippets.",
-         {"query": {"type": "string"}}, ["query"], _search, spoken_start="Let me look that up."),
+         {"query": {"type": "string"}}, ["query"], _search, deferrable=True,
+         spoken_start="Let me look that up."),
     Tool("news_headlines", "Latest news headlines from BBC News, optionally filtered by keywords.",
          {"topic": {"type": "string", "enum": list(web_tools.NEWS_FEEDS)},
           "query": {"type": "string", "description": "Optional keywords that must appear"}},
-         [], _news, spoken_start="Checking the news."),
+         [], _news, deferrable=True, spoken_start="Checking the news."),
     Tool("wikipedia", "Look up a person, place, thing or concept on Wikipedia and get the "
          "article's opening summary. Better than web_search for encyclopedic facts.",
-         {"topic": {"type": "string"}}, ["topic"], _wikipedia, spoken_start="Looking that up."),
+         {"topic": {"type": "string"}}, ["topic"], _wikipedia, deferrable=True,
+         spoken_start="Looking that up."),
     Tool("fetch_url", "Fetch a public web page and summarise it or answer a question about it.",
          {"url": {"type": "string"}, "question": {"type": "string"}},
          ["url"], _fetch, spoken_start="Reading that page."),
@@ -263,7 +270,8 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
          {"amount": {"type": "number"},
           "from_unit": {"type": "string", "description": "e.g. km, lb, F, cup, or a currency code like USD"},
           "to_unit": {"type": "string", "description": "e.g. mi, kg, C, ml, or a currency code like EUR"}},
-         ["amount", "from_unit", "to_unit"], _convert, spoken_start="Let me work that out."),
+         ["amount", "from_unit", "to_unit"], _convert, deferrable=True,
+         spoken_start="Let me work that out."),
     Tool("add_note", "Save a note for the caller.", {"text": {"type": "string"}},
          ["text"], _add_note, agentic=True),
     Tool("list_notes", "Read back the caller's most recent notes.", {}, [], _list_notes,
@@ -333,7 +341,7 @@ def _needs_confirmation(call: vapi.ToolCall, ctx: Ctx) -> bool:
 
 
 tool_calls_total = metrics.Counter("voice_agent_tool_calls_total",
-                                   "Tool calls by tool and outcome (ok, error, confirm).",
+                                   "Tool calls by tool and outcome (ok, error, confirm, deferred).",
                                    ("tool", "outcome"))
 tool_latency = metrics.Histogram("voice_agent_tool_duration_seconds",
                                  "Tool call latency including guards.", ("tool",))
@@ -342,6 +350,8 @@ tool_latency = metrics.Histogram("voice_agent_tool_duration_seconds",
 def _outcome(out: dict) -> str:
     if "error" in out:
         return "error"
+    if out["result"].startswith(STILL_WORKING):
+        return "deferred"
     return "confirm" if out["result"].startswith("CONFIRMATION REQUIRED") else "ok"
 
 
@@ -370,6 +380,17 @@ def _record(call: vapi.ToolCall, ctx: Ctx, outcome: str, output: str, elapsed: f
         log_event("tool.record_failed", logging.ERROR, error=repr(e))
 
 
+def _defer(call: vapi.ToolCall, ctx: Ctx, task: asyncio.Task) -> dict:
+    """Answer now with a holding instruction; let the lookup finish and fill the cache."""
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+    task.add_done_callback(lambda t: t.cancelled() or t.exception())  # no "never retrieved"
+    log_event("tool.deferred", tool=call.name, call_id=ctx.call_id)
+    return vapi.result(call, f"{STILL_WORKING}. The lookup is slow right now. Tell the caller "
+                             f"you're still checking, then call {call.name} again with the same "
+                             "arguments; the answer will be ready.")
+
+
 async def _dispatch(call: vapi.ToolCall, ctx: Ctx) -> dict:
     s = get_settings()
     tool = TOOLS.get(call.name)
@@ -392,7 +413,12 @@ async def _dispatch(call: vapi.ToolCall, ctx: Ctx) -> dict:
             return vapi.result(call, f"CONFIRMATION REQUIRED. Read this back and ask the caller to "
                                      f"confirm: I'm about to {action}. If they clearly say yes, call "
                                      f"{call.name} again with the same arguments and confirmed=true.")
-        out = await asyncio.wait_for(tool.handler(call.args, ctx), TOOL_TIMEOUT_S)
+        task = asyncio.ensure_future(tool.handler(call.args, ctx))
+        if tool.deferrable and s.tool_soft_deadline_s > 0:
+            done, _ = await asyncio.wait({task}, timeout=s.tool_soft_deadline_s)
+            if not done:
+                return _defer(call, ctx, task)
+        out = await asyncio.wait_for(task, TOOL_TIMEOUT_S)
     except ValueError as e:
         return vapi.error(call, str(e))
     except asyncio.TimeoutError:

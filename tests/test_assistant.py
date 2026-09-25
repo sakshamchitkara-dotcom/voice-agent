@@ -17,7 +17,8 @@ def test_trusted_caller_gets_all_tools():
     assert "confirmed" in tool["function"]["parameters"]["properties"]
     assert tool["server"] == {"url": "https://agent.example.com/vapi/webhook", "timeoutSeconds": 20,
                               "headers": {"X-Vapi-Secret": "test-secret"}}
-    assert tool["messages"][0]["type"] == "request-start"
+    assert [m["type"] for m in tool["messages"]] == ["request-start", "request-response-delayed"]
+    assert tool["messages"][1]["timingMilliseconds"] == 1000
     assert a["serverMessages"] == ["tool-calls", "status-update", "end-of-call-report",
                                    "transfer-destination-request", "transfer-update"]
 
