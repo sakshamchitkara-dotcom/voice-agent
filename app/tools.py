@@ -15,7 +15,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Any, Awaitable, Callable
 
-from . import convert, db, jobs, llm, metrics, notify, vapi, web_tools
+from . import convert, db, jobs, llm, memory, metrics, notify, vapi, web_tools
 from .config import get_settings
 from .logs import log_event, request_id
 from .security import limiter
@@ -123,6 +123,14 @@ async def _list_notes(a: dict, ctx: Ctx) -> str:
     return " ".join(f"Note {r['id']} ({r['created_at'][:10]}): {r['body']}." for r in rows)
 
 
+async def _forget_me(a: dict, ctx: Ctx) -> str:
+    if not ctx.caller:
+        raise ValueError("I only keep memories for phone numbers, so there's nothing to forget.")
+    n = memory.forget(ctx.caller)
+    return (f"Done. I deleted {n} thing{'s' if n != 1 else ''} I remembered about you."
+            if n else "I didn't have anything remembered about you.")
+
+
 def _parse_when(value: str) -> datetime:
     try:
         return datetime.fromisoformat(value)
@@ -207,6 +215,10 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
          ["text"], _add_note, agentic=True),
     Tool("list_notes", "Read back the caller's most recent notes.", {}, [], _list_notes,
          agentic=True),
+    Tool("forget_me", "Permanently delete everything remembered about the caller from past "
+         "calls (long-term memory). Notes and calendar events are not affected.", {}, [],
+         _forget_me, agentic=True,
+         confirm=lambda a, c: "permanently delete everything I remember about you from past calls"),
     Tool("create_event", "Add an event to the caller's calendar.",
          {"title": {"type": "string"},
           "starts_at": {"type": "string", "description": "ISO 8601 local date-time"},

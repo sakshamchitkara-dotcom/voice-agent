@@ -146,3 +146,15 @@ async def test_tool_calls_are_recorded_for_the_audit_trail():
         {"call_id": "call-2", "tool": "add_note", "args": '{"text": "x"}',
          "outcome": "error", "output": "That action isn't available for this caller."},
     ]
+
+
+async def test_forget_me_needs_confirmation_and_clears_memory():
+    from app import memory
+    memory.save("+14155550100", ["Their name is Priya.", "They prefer texts."], "c0", "rules")
+    first = await tools.run(tc("forget_me"), TRUSTED)
+    assert "permanently delete everything I remember" in first["result"]
+    assert len(memory.facts_for("+14155550100")) == 2
+    done = await tools.run(tc("forget_me", confirmed=True), TRUSTED)
+    assert done["result"] == "Done. I deleted 2 things I remembered about you."
+    assert memory.facts_for("+14155550100") == []
+    assert (await tools.run(tc("forget_me"), STRANGER))["error"].startswith("That action isn't")
