@@ -6,14 +6,15 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
-from . import db, jobs, llm, tools, vapi
+from . import db, jobs, llm, metrics, tools, vapi
 from .assistant import build_assistant
 from .config import get_settings
 from .logs import log_event, request_id, setup_logging
@@ -40,12 +41,24 @@ async def request_context(request: Request, call_next):
     incoming = request.headers.get("x-request-id", "")
     rid = incoming if _SAFE_ID.match(incoming) else uuid.uuid4().hex[:16]
     token = request_id.set(rid)
+    start = time.perf_counter()
+    status = 500
     try:
         response = await call_next(request)
+        status = response.status_code
     finally:
         request_id.reset(token)
+        # Route template, not the raw path, so metric labels stay bounded.
+        route = getattr(request.scope.get("route"), "path", "unmatched")
+        metrics.http_requests.inc(method=request.method, route=route, status=str(status))
+        metrics.http_latency.observe(time.perf_counter() - start, method=request.method, route=route)
     response.headers["X-Request-ID"] = rid
     return response
+
+
+@app.get("/metrics", include_in_schema=False)
+async def prometheus_metrics() -> PlainTextResponse:
+    return PlainTextResponse(metrics.render(), media_type="text/plain; version=0.0.4")
 
 CALL_SUMMARY_SYSTEM = ("Summarise this phone call transcript in 2-3 sentences: what the caller "
                        "wanted, what was done, and any follow-ups promised.")
@@ -90,6 +103,7 @@ async def vapi_webhook(request: Request, background: BackgroundTasks):
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
     kind = message.get("type")
+    metrics.webhook_messages.inc(type=str(kind))
     call = vapi.call_of(message)
     call_id, caller, ctype = call.get("id"), vapi.caller_number(message), vapi.call_type(message)
     log_event("webhook.received", type=kind, call_id=call_id, caller=caller)
