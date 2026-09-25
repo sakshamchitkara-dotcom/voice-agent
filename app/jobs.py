@@ -5,6 +5,7 @@ import asyncio
 import logging
 
 from . import db, llm, notify, web_tools
+from .config import get_settings
 from .logs import log_event
 
 DEEP_SYSTEM = (
@@ -46,9 +47,17 @@ def get_job(job_id: int):
         return conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
 
 
+def _claim(job_id: int) -> bool:
+    """queued -> running, atomically: with several workers only one runs a given job."""
+    with db.connect() as conn:
+        return bool(conn.execute("UPDATE jobs SET status = 'running', updated_at = CURRENT_TIMESTAMP "
+                                 "WHERE id = ? AND status = 'queued'", (job_id,)).rowcount)
+
+
 async def run_job(job_id: int) -> None:
+    if not _claim(job_id):
+        return
     job = get_job(job_id)
-    _set(job_id, status="running")
     try:
         text = await llm.complete(job["task"], DEEP_SYSTEM, effort="high",
                                   max_tokens=16000, web_search=True)
@@ -97,8 +106,18 @@ async def deliver_for_call(call_id: str) -> None:
 
 
 def resume_pending() -> None:
-    """On startup: restart interrupted jobs and retry undelivered finished ones."""
+    """On startup: restart interrupted jobs and retry undelivered finished ones.
+
+    Single instance: any 'running' job was interrupted by the restart. With SHARED_STATE=sqlite
+    another worker may still be running it, so only jobs untouched for 15 minutes are retaken.
+    """
+    age = "-15 minutes" if get_settings().shared_state == "sqlite" else "+1 minute"
     with db.connect() as conn:
+        conn.execute("UPDATE jobs SET status = 'queued' WHERE status = 'running' AND delivered = 0 "
+                     "AND updated_at <= datetime('now', ?)", (age,))
         rows = conn.execute("SELECT id, status FROM jobs WHERE delivered = 0").fetchall()
     for r in rows:
-        _spawn(run_job(r["id"]) if r["status"] in ("queued", "running") else deliver_if_ready(r["id"]))
+        if r["status"] == "queued":
+            _spawn(run_job(r["id"]))
+        elif r["status"] in ("done", "failed"):
+            _spawn(deliver_if_ready(r["id"]))

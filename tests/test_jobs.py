@@ -40,3 +40,30 @@ async def test_job_falls_back_to_search_without_claude(monkeypatch):
     job = jobs.get_job(job_id)
     assert job["status"] == "done" and job["delivered"] == 1
     assert job["result"].startswith("Claude was unavailable") and "https://t.example" in job["result"]
+
+
+async def test_two_workers_resuming_run_each_job_once(monkeypatch):
+    runs = []
+
+    async def counting(*a, **kw):
+        runs.append(a[0])
+        return "done"
+    monkeypatch.setattr(llm, "complete", counting)
+    with db.connect() as conn:
+        conn.execute("INSERT INTO jobs (id, task, channel, recipient, status) "
+                     "VALUES (1, 'interrupted', 'email', 'a@b.co', 'running')")
+    jobs.resume_pending()
+    jobs.resume_pending()  # a second worker starting at the same time
+    await asyncio.gather(*jobs._running)
+    assert runs == ["interrupted"] and jobs.get_job(1)["status"] == "done"
+
+
+async def test_shared_mode_leaves_fresh_running_jobs_to_their_worker(monkeypatch):
+    from app.config import get_settings
+    monkeypatch.setenv("SHARED_STATE", "sqlite")
+    get_settings.cache_clear()
+    with db.connect() as conn:
+        conn.execute("INSERT INTO jobs (id, task, channel, recipient, status) "
+                     "VALUES (1, 'busy elsewhere', 'email', 'a@b.co', 'running')")
+    jobs.resume_pending()
+    assert not jobs._running and jobs.get_job(1)["status"] == "running"
