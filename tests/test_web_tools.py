@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from app import web_tools
+from tests.conftest import FIXTURES
 
 
 @pytest.fixture
@@ -35,3 +36,15 @@ async def test_weather_formats_open_meteo(mock_http):
 async def test_weather_unknown_place(mock_http):
     mock_http(lambda req: httpx.Response(200, json={}))
     assert "couldn't find" in await web_tools.get_weather("Nowhere")
+
+
+def test_parse_ddg_skips_ads_and_unwraps_redirects():
+    page = (FIXTURES / "ddg_results.html").read_text()
+    results = web_tools.parse_ddg(page)
+    assert results == [
+        {"title": "Vapi - Build Advanced Voice AI Agents", "url": "https://vapi.ai/",
+         "snippet": "Build, test, and deploy advanced voice AI agents in minutes with Vapi."},
+        {"title": "Vapi & Docs", "url": "https://docs.vapi.ai/quickstart", "snippet": ""},
+    ]
+    assert web_tools.format_results(results).startswith("1. Vapi - Build")
+    assert web_tools.format_results([]) == "No results found."

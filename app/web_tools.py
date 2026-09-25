@@ -1,6 +1,10 @@
 """Keyless internet tools: Open-Meteo weather, DuckDuckGo search, URL fetch."""
 from __future__ import annotations
 
+import html
+import re
+from urllib.parse import parse_qs, unquote, urlparse
+
 import httpx
 
 UA = "Mozilla/5.0 (compatible; voice-agent/0.1; +https://github.com/sakshamchitkara-dotcom/voice-agent)"
@@ -52,3 +56,49 @@ async def get_weather(location: str) -> str:
         f"{day['temperature_2m_max'][0]:.0f}°C"
         + (f", {rain}% chance of rain." if rain is not None else ".")
     )
+
+
+def strip_tags(fragment: str) -> str:
+    return " ".join(html.unescape(re.sub(r"<[^>]+>", "", fragment)).split())
+
+
+def _real_url(href: str) -> str:
+    # DDG sometimes wraps results as //duckduckgo.com/l/?uddg=<encoded target>
+    if "duckduckgo.com/l/" in href:
+        target = parse_qs(urlparse(href).query).get("uddg")
+        if target:
+            return unquote(target[0])
+    return "https:" + href if href.startswith("//") else href
+
+
+def parse_ddg(page: str, limit: int = 5) -> list[dict]:
+    results = []
+    for chunk in page.split('class="result__a"')[1:]:
+        m = re.search(r'href="([^"]+)"[^>]*>(.*?)</a>', chunk, re.S)
+        if not m:
+            continue
+        url = _real_url(html.unescape(m.group(1)))
+        if "duckduckgo.com/y.js" in url:  # sponsored result
+            continue
+        snip = re.search(r'class="result__snippet"[^>]*>(.*?)</a>', chunk, re.S)
+        results.append({"title": strip_tags(m.group(2)), "url": url,
+                        "snippet": strip_tags(snip.group(1)) if snip else ""})
+        if len(results) >= limit:
+            break
+    return results
+
+
+async def search(query: str, limit: int = 5) -> list[dict]:
+    async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": UA}) as client:
+        r = await client.post("https://html.duckduckgo.com/html/", data={"q": query})
+        r.raise_for_status()
+        if r.status_code == 202:  # DDG's bot challenge page
+            raise RuntimeError("search provider is rate limiting us, try again shortly")
+    return parse_ddg(r.text, limit)
+
+
+def format_results(results: list[dict]) -> str:
+    if not results:
+        return "No results found."
+    return " | ".join(f"{i}. {r['title']} ({r['url']}): {r['snippet']}"
+                      for i, r in enumerate(results, 1))
