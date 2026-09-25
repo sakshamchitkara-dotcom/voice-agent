@@ -15,7 +15,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Any, Awaitable, Callable
 
-from . import db, jobs, llm, notify, vapi, web_tools
+from . import db, jobs, llm, metrics, notify, vapi, web_tools
 from .config import get_settings
 from .logs import log_event
 from .security import limiter
@@ -224,7 +224,29 @@ def _needs_confirmation(call: vapi.ToolCall, ctx: Ctx) -> bool:
     return True
 
 
+tool_calls_total = metrics.Counter("voice_agent_tool_calls_total",
+                                   "Tool calls by tool and outcome (ok, error, confirm).",
+                                   ("tool", "outcome"))
+tool_latency = metrics.Histogram("voice_agent_tool_duration_seconds",
+                                 "Tool call latency including guards.", ("tool",))
+
+
+def _outcome(out: dict) -> str:
+    if "error" in out:
+        return "error"
+    return "confirm" if out["result"].startswith("CONFIRMATION REQUIRED") else "ok"
+
+
 async def run(call: vapi.ToolCall, ctx: Ctx) -> dict:
+    start = time.perf_counter()
+    out = await _dispatch(call, ctx)
+    name = call.name if call.name in TOOLS else "unknown"  # bounded label values
+    tool_calls_total.inc(tool=name, outcome=_outcome(out))
+    tool_latency.observe(time.perf_counter() - start, tool=name)
+    return out
+
+
+async def _dispatch(call: vapi.ToolCall, ctx: Ctx) -> dict:
     s = get_settings()
     tool = TOOLS.get(call.name)
     if tool is None:

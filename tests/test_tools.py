@@ -117,3 +117,18 @@ async def test_deep_task_queues_after_confirmation(monkeypatch):
 async def test_confirmation_prompt_has_no_double_period():
     r = await tools.run(tc("send_followup", channel="sms", message="Moved to 3pm."), TRUSTED)
     assert "3pm.." not in r["result"] and "3pm. If they clearly say yes" in r["result"]
+
+
+async def test_tool_metrics_record_outcomes():
+    from app import metrics
+    metrics.reset()
+    await tools.run(tc("add_note", text="x"), TRUSTED)
+    await tools.run(tc("add_note", text="x"), STRANGER)
+    await tools.run(tc("send_followup", channel="sms", message="hi"), TRUSTED)
+    await tools.run(tc("made_up"), TRUSTED)
+    text = metrics.render()
+    assert 'voice_agent_tool_calls_total{tool="add_note",outcome="ok"} 1' in text
+    assert 'voice_agent_tool_calls_total{tool="add_note",outcome="error"} 1' in text
+    assert 'voice_agent_tool_calls_total{tool="send_followup",outcome="confirm"} 1' in text
+    assert 'voice_agent_tool_calls_total{tool="unknown",outcome="error"} 1' in text
+    assert 'voice_agent_tool_duration_seconds_count{tool="add_note"} 2' in text
