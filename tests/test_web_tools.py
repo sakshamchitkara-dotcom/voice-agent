@@ -74,3 +74,38 @@ async def test_fetch_revalidates_redirect_targets(mock_http, monkeypatch):
 def test_html_to_text_drops_scripts_and_tags():
     page = "<html><head><title>x</title></head><body><script>evil()</script><p>Hi &amp; bye</p></body>"
     assert web_tools.html_to_text(page) == "Hi & bye"
+
+
+async def test_ttl_cache_normalises_keys_expires_and_skips_errors(monkeypatch):
+    calls = []
+
+    @web_tools.ttl_cache(60)
+    async def lookup(q):
+        calls.append(q)
+        if q == "boom":
+            raise RuntimeError("upstream down")
+        return q.upper()
+
+    assert await lookup("Paris") == "PARIS"
+    assert await lookup("  paris ") == "PARIS"  # same key after normalising
+    assert calls == ["Paris"]
+    for _ in range(2):
+        with pytest.raises(RuntimeError):
+            await lookup("boom")
+    assert calls.count("boom") == 2  # failures are retried, not cached
+    now = web_tools.time.monotonic()
+    monkeypatch.setattr(web_tools.time, "monotonic", lambda: now + 61)
+    await lookup("paris")
+    assert calls[-1] == "paris"
+
+
+async def test_weather_is_cached(mock_http):
+    hits = []
+
+    def handler(req):
+        hits.append(req.url.host)
+        return httpx.Response(200, json={})
+    mock_http(handler)
+    await web_tools.get_weather("Atlantis")
+    await web_tools.get_weather("atlantis")
+    assert len(hits) == 1

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from app import db
+from app import db, web_tools
 from app.config import get_settings
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -24,6 +24,7 @@ def env(tmp_path, monkeypatch):
     for var in ("VAPI_HMAC_SECRET", "ANTHROPIC_API_KEY", "SMTP_HOST", "TWILIO_ACCOUNT_SID"):
         monkeypatch.delenv(var, raising=False)
     get_settings.cache_clear()
+    web_tools.clear_caches()
     db.init_db()
     yield
     get_settings.cache_clear()

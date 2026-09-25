@@ -2,16 +2,58 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import html
 import ipaddress
 import re
 import socket
+import time
 from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
+from . import metrics
+
 UA = "Mozilla/5.0 (compatible; voice-agent/0.1; +https://github.com/sakshamchitkara-dotcom/voice-agent)"
 TIMEOUT = httpx.Timeout(8.0, connect=4.0)
+
+cache_lookups = metrics.Counter("voice_agent_cache_lookups_total", "Tool cache lookups.",
+                                ("cache", "result"))
+_caches: list[dict] = []
+
+
+def ttl_cache(seconds: float, maxsize: int = 256):
+    """Cache an async function's successful results by its (normalised) string args.
+
+    Voice tools must answer in well under a second; repeat questions within a call or
+    across callers ("weather in Paris") should not hit the upstream API again.
+    ponytail: per-process dict with FIFO eviction; move to Redis for several instances.
+    """
+    def deco(fn):
+        store: dict[tuple, tuple[float, object]] = {}
+        _caches.append(store)
+
+        @functools.wraps(fn)
+        async def wrapper(*args):
+            key = tuple(" ".join(str(a).lower().split()) for a in args)
+            hit = store.get(key)
+            if hit and hit[0] > time.monotonic():
+                cache_lookups.inc(cache=fn.__name__, result="hit")
+                return hit[1]
+            cache_lookups.inc(cache=fn.__name__, result="miss")
+            value = await fn(*args)  # exceptions are not cached
+            if len(store) >= maxsize:
+                store.pop(next(iter(store)))
+            store[key] = (time.monotonic() + seconds, value)
+            return value
+        return wrapper
+    return deco
+
+
+def clear_caches() -> None:
+    for store in _caches:
+        store.clear()
+
 
 # WMO weather interpretation codes used by Open-Meteo.
 WMO = {
@@ -25,6 +67,7 @@ WMO = {
 }
 
 
+@ttl_cache(600)
 async def get_weather(location: str) -> str:
     async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": UA}) as client:
         geo = await client.get(
@@ -91,6 +134,7 @@ def parse_ddg(page: str, limit: int = 5) -> list[dict]:
     return results
 
 
+@ttl_cache(300)
 async def search(query: str, limit: int = 5) -> list[dict]:
     async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": UA}) as client:
         r = await client.post("https://html.duckduckgo.com/html/", data={"q": query})
