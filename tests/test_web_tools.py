@@ -176,3 +176,20 @@ async def test_lookups_share_one_keepalive_client():
     assert web_tools.http() is a  # reused: no new TCP/TLS handshake per request
     await web_tools.close_http()
     assert web_tools.http() is not a
+
+
+async def test_refresh_bypasses_cache_and_prefetch_loop_warms(monkeypatch):
+    import asyncio
+    calls = []
+
+    @web_tools.ttl_cache(600)
+    async def fake(location):
+        calls.append(location)
+        return f"{location}: {len(calls)}"
+    monkeypatch.setattr(web_tools, "get_weather", fake)
+    assert await fake("Oslo") == "Oslo: 1" and await fake("oslo") == "Oslo: 1"
+    assert await fake.refresh("Oslo") == "Oslo: 2"
+    loop = asyncio.create_task(web_tools.prefetch_loop(("Lima",), every_s=60))
+    await asyncio.sleep(0.01)
+    loop.cancel()
+    assert calls == ["Oslo", "Oslo", "Lima"] and await fake("lima") == "Lima: 3"

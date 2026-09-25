@@ -61,9 +61,12 @@ def ttl_cache(seconds: float, maxsize: int = 256):
         inflight: dict[tuple, asyncio.Future] = {}
         _caches.append(store)
 
+        def keyof(args) -> tuple:
+            return tuple(" ".join(str(a).lower().split()) for a in args)
+
         @functools.wraps(fn)
         async def wrapper(*args):
-            key = tuple(" ".join(str(a).lower().split()) for a in args)
+            key = keyof(args)
             hit = store.get(key)
             if hit and hit[0] > time.monotonic():
                 cache_lookups.inc(cache=fn.__name__, result="hit")
@@ -86,6 +89,12 @@ def ttl_cache(seconds: float, maxsize: int = 256):
                 store.pop(next(iter(store)))
             store[key] = (time.monotonic() + seconds, value)
             return value
+
+        async def refresh(*args):
+            """Fetch again even if cached (prefetch loop)."""
+            store.pop(keyof(args), None)
+            return await wrapper(*args)
+        wrapper.refresh = refresh
         return wrapper
     return deco
 
@@ -145,6 +154,32 @@ async def get_weather(location: str) -> str:
         f"{day['temperature_2m_max'][0]:.0f}°C"
         + (f", {rain}% chance of rain." if rain is not None else ".")
     )
+
+
+_prefetching: set[asyncio.Task] = set()
+
+
+def prefetch_weather(location: str) -> None:
+    """Warm the weather cache (and the pooled connections) in the background."""
+    async def go():
+        try:
+            await get_weather(location)
+        except Exception:  # a failed prefetch just means a normal lookup later
+            pass
+    task = asyncio.create_task(go())
+    _prefetching.add(task)
+    task.add_done_callback(_prefetching.discard)
+
+
+async def prefetch_loop(locations: tuple[str, ...], every_s: float = 540) -> None:
+    """Keep configured places warm: refresh just before the 10 minute TTL runs out."""
+    while locations:
+        for place in locations:
+            try:
+                await get_weather.refresh(place)
+            except Exception:
+                pass
+        await asyncio.sleep(every_s)
 
 
 def strip_tags(fragment: str) -> str:

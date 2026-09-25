@@ -102,6 +102,17 @@ def facts_for(caller: str | None, limit: int = 20) -> list[str]:
     return [r[0] for r in reversed(rows)]
 
 
+_HOME = re.compile(r"^They (?:live|are based) in ([^.]{2,60})\.$")
+
+
+def home_place(facts: list[str]) -> str | None:
+    """Most recent 'They live in X.' / 'They are based in X.' fact, for weather prefetch."""
+    for fact in reversed(facts):
+        if m := _HOME.match(fact):
+            return m.group(1)
+    return None
+
+
 def forget(caller: str) -> int:
     with db.connect() as conn:
         return conn.execute("DELETE FROM memories WHERE caller = ?", (caller,)).rowcount

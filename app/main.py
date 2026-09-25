@@ -27,9 +27,11 @@ async def lifespan(app: FastAPI):
     db.init_db()
     jobs.resume_pending()
     dispatcher = asyncio.create_task(reminders.run_dispatcher())
+    prefetch = asyncio.create_task(web_tools.prefetch_loop(get_settings().weather_prefetch))
     log_event("server.started", public_url=get_settings().public_url)
     yield
     dispatcher.cancel()
+    prefetch.cancel()
     await web_tools.close_http()
 
 
@@ -117,6 +119,8 @@ async def vapi_webhook(request: Request, background: BackgroundTasks):
         if call_id:
             db.upsert_call(call_id, caller=caller, type=ctype, status=call.get("status"))
         memories = memory.facts_for(caller) if trusted else []
+        if home := memory.home_place(memories):
+            web_tools.prefetch_weather(home)  # "what's the weather" is a likely first question
         return {"assistant": build_assistant(s, trusted, memories=memories)}
 
     if kind == "tool-calls":

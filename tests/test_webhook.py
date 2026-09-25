@@ -152,6 +152,15 @@ def test_assistant_request_includes_caller_memory(client):
     assert "- Their name is Priya." in prompt
 
 
+def test_assistant_request_prefetches_remembered_home_weather(client, monkeypatch):
+    from app import memory
+    warmed = []
+    monkeypatch.setattr(web_tools, "prefetch_weather", warmed.append)
+    memory.save("+14155550100", ["They live in Oakland."], "old-call", "rules")
+    post(client, "assistant_request.json")
+    assert warmed == ["Oakland"]
+
+
 def test_transfer_destination_only_after_confirmed_request(client, monkeypatch):
     from app.config import get_settings
     from app import tools

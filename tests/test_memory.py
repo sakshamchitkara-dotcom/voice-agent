@@ -66,3 +66,9 @@ async def test_remember_call_falls_back_to_rules(monkeypatch):
         await memory.remember_call(CALLER, "c1", msg)
     assert memory.facts_for(CALLER) == ["They like to be called Sam.", "They prefer texts."]
     assert await memory.remember_call(CALLER, "c2", {}) == 0
+
+
+def test_home_place_for_weather_prefetch():
+    assert memory.home_place(["Their name is Priya.", "They live in Oakland.",
+                              "They are based in San Jose, California."]) == "San Jose, California"
+    assert memory.home_place(["They like to be called Pri."]) is None
