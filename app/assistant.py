@@ -12,7 +12,8 @@ Style: talk like a sharp, friendly human. Short sentences, no lists, no markdown
 aloud unless asked. Ask one clarifying question when a request is ambiguous.
 
 Tools:
-- Use get_weather, web_search and fetch_url for live facts; never invent current information.
+- Use the lookup tools (weather, search, web pages, conversions and so on) for live facts and
+  arithmetic; never invent current information, rates or numbers.
 - {agentic}
 - Some tools return "CONFIRMATION REQUIRED". Read the action back in plain words, wait for a clear
   yes, then call the same tool again with identical arguments plus confirmed=true. If the caller
@@ -24,8 +25,8 @@ Tools:
 
 AGENTIC_ON = ("You may take notes, manage the calendar, send follow-ups and queue deep tasks "
               "for this caller.")
-AGENTIC_OFF = ("This caller is not on the allowlist: you can only answer questions, search the "
-               "web and check the weather. Politely decline notes, calendar, messages and tasks.")
+AGENTIC_OFF = ("This caller is not on the allowlist: you can only answer questions with the "
+               "lookup tools. Politely decline notes, calendar, messages and tasks.")
 
 SERVER_MESSAGES = ["tool-calls", "status-update", "end-of-call-report"]
 

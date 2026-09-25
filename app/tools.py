@@ -15,7 +15,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Any, Awaitable, Callable
 
-from . import db, jobs, llm, metrics, notify, vapi, web_tools
+from . import convert, db, jobs, llm, metrics, notify, vapi, web_tools
 from .config import get_settings
 from .logs import log_event, request_id
 from .security import limiter
@@ -85,6 +85,14 @@ async def _fetch(a: dict, ctx: Ctx) -> str:
     prompt = f"URL: {url}\nQuestion: {question}\n\n<page>\n{text[:40000]}\n</page>"
     summary = await llm.complete(prompt, SUMMARY_SYSTEM, effort="low", max_tokens=600)
     return summary or f"(Summary unavailable) The page begins: {text[:600]}"
+
+
+async def _convert(a: dict, ctx: Ctx) -> str:
+    try:
+        amount = float(str(a["amount"]).replace(",", ""))
+    except ValueError:
+        raise ValueError("amount must be a number.") from None
+    return await convert.convert(amount, str(a["from_unit"]), str(a["to_unit"]))
 
 
 def _owner(ctx: Ctx) -> str:
@@ -174,6 +182,12 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
     Tool("fetch_url", "Fetch a public web page and summarise it or answer a question about it.",
          {"url": {"type": "string"}, "question": {"type": "string"}},
          ["url"], _fetch, spoken_start="Reading that page."),
+    Tool("convert", "Convert an amount between units (length, mass, volume, speed, "
+         "temperature) or between currencies using today's ECB reference rates.",
+         {"amount": {"type": "number"},
+          "from_unit": {"type": "string", "description": "e.g. km, lb, F, cup, or a currency code like USD"},
+          "to_unit": {"type": "string", "description": "e.g. mi, kg, C, ml, or a currency code like EUR"}},
+         ["amount", "from_unit", "to_unit"], _convert, spoken_start="Let me work that out."),
     Tool("add_note", "Save a note for the caller.", {"text": {"type": "string"}},
          ["text"], _add_note, agentic=True),
     Tool("list_notes", "Read back the caller's most recent notes.", {}, [], _list_notes,

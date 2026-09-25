@@ -2,6 +2,7 @@ from dataclasses import replace
 
 from app.assistant import build_assistant
 from app.config import get_settings
+from app.tools import TOOLS
 
 
 def names(a):
@@ -22,7 +23,9 @@ def test_trusted_caller_gets_all_tools():
 
 def test_untrusted_caller_gets_read_only_tools():
     a = build_assistant(get_settings(), trusted=False)
-    assert names(a) == {"get_weather", "web_search", "fetch_url"}
+    assert names(a) == {name for name, t in TOOLS.items() if not t.agentic}
+    assert {"get_weather", "web_search", "fetch_url", "convert"} <= names(a)
+    assert not names(a) & {"add_note", "send_followup", "deep_task"}
     assert "not on the allowlist" in a["model"]["messages"][0]["content"]
 
 
