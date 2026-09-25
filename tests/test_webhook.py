@@ -143,3 +143,10 @@ def test_end_of_call_report_updates_memory_for_trusted_callers_only(client, monk
     payload["message"]["call"]["customer"]["number"] = "+19995550199"
     client.post("/vapi/webhook", json=payload, headers=AUTH)
     assert memory.facts_for("+19995550199") == []
+
+
+def test_assistant_request_includes_caller_memory(client):
+    from app import memory
+    memory.save("+14155550100", ["Their name is Priya."], "old-call", "rules")
+    prompt = post(client, "assistant_request.json").json()["assistant"]["model"]["messages"][0]["content"]
+    assert "- Their name is Priya." in prompt

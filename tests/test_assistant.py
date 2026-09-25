@@ -46,3 +46,12 @@ def test_owner_name_wording():
     a = build_assistant(replace(s, owner_name="Sam"), trusted=True)
     assert a["firstMessage"] == "Hey Sam, what can I do for you?"
     assert a["model"]["messages"][0]["content"].startswith("You are Sam's personal voice assistant")
+
+
+def test_memories_are_injected_for_trusted_callers_only():
+    facts = ["Their name is Priya.", "They prefer texts."]
+    prompt = build_assistant(get_settings(), trusted=True, memories=facts)["model"]["messages"][0]["content"]
+    assert prompt.endswith("<memory>\n- Their name is Priya.\n- They prefer texts.\n</memory>")
+    untrusted = build_assistant(get_settings(), trusted=False, memories=facts)
+    assert "<memory>" not in untrusted["model"]["messages"][0]["content"]
+    assert "<memory>" not in build_assistant(get_settings(), trusted=True)["model"]["messages"][0]["content"]

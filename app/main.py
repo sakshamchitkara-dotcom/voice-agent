@@ -112,7 +112,8 @@ async def vapi_webhook(request: Request, background: BackgroundTasks):
         trusted = is_trusted(caller, ctype, s)
         if call_id:
             db.upsert_call(call_id, caller=caller, type=ctype, status=call.get("status"))
-        return {"assistant": build_assistant(s, trusted)}
+        memories = memory.facts_for(caller) if trusted else []
+        return {"assistant": build_assistant(s, trusted, memories=memories)}
 
     if kind == "tool-calls":
         ctx = tools.Ctx(call_id=call_id, caller=caller, trusted=is_trusted(caller, ctype, s))
