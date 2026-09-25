@@ -37,3 +37,11 @@ async def test_off_by_default_and_unknown_calls_render_nothing():
     assert await postcall.email_owner("c1") is None and outbox() == []
     assert postcall.render("nope") is None
     assert postcall._length(None, "2026-09-25T17:00:00Z") == "unknown"
+
+
+def test_outbound_callback_is_not_described_as_the_caller_calling():
+    db.upsert_call("vapi-call-9", caller="+14155550100", type="outboundPhoneCall", ended_reason="voicemail",
+                   started_at="2026-09-26T22:00:02.000Z", ended_at="2026-09-26T22:00:41.000Z")
+    subject, body = postcall.render("vapi-call-9")
+    assert subject == "Call to +14155550100 (0 min 39 s)"
+    assert body.startswith("Outbound call to +14155550100 at 2026-09-26T22:00:02.000Z.\nLength: 0 min 39 s · Ended: voicemail")

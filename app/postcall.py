@@ -12,7 +12,7 @@ from . import db, notify
 from .config import get_settings
 
 TEMPLATE = """\
-{who} called{when}.
+{headline}{when}.
 Length: {length} · Ended: {ended}
 
 Summary
@@ -49,16 +49,18 @@ def render(call_id: str) -> tuple[str, str] | None:
         rems = conn.execute("SELECT kind, due_at, message FROM reminders WHERE call_id = ?",
                             (call_id,)).fetchall()
     who = call["caller"] or ("A web caller" if call["type"] == "webCall" else "Someone")
+    outbound = call["type"] == "outboundPhoneCall"  # e.g. a reminder callback we placed
+    headline = f"Outbound call to {who}" if outbound else f"{who} called"
     length = _length(call["started_at"], call["ended_at"])
     actions = "\n".join(f"- {t}" + (f" ×{n}" if n > 1 else "") for t, n in sorted(tools.items()))
     followups = [f"- Deep task by {j['channel']}: {j['task']}" for j in jobs]
     followups += [f"- Reminder ({r['kind']}) at {r['due_at']}: {r['message']}" for r in rems]
     body = TEMPLATE.format(
-        who=who, when=f" at {call['started_at']}" if call["started_at"] else "",
+        headline=headline, when=f" at {call['started_at']}" if call["started_at"] else "",
         length=length, ended=call["ended_reason"] or "unknown",
         summary=call["summary"] or "(no summary)", actions=actions or "- nothing, just talked",
         followups="\n".join(followups) or "- none", link=f"{get_settings().public_url}/admin/calls/{call_id}")
-    return f"Call from {who} ({length})", body
+    return f"{'Call to' if outbound else 'Call from'} {who} ({length})", body
 
 
 async def email_owner(call_id: str) -> str | None:
