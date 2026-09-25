@@ -14,7 +14,7 @@ from pathlib import Path
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
-from . import db, jobs, llm, memory, metrics, tools, vapi
+from . import db, jobs, llm, memory, metrics, reminders, tools, vapi
 from .assistant import build_assistant
 from .config import get_settings
 from .logs import log_event, request_id, setup_logging
@@ -26,8 +26,10 @@ async def lifespan(app: FastAPI):
     setup_logging(os.getenv("LOG_LEVEL", "INFO"))
     db.init_db()
     jobs.resume_pending()
+    dispatcher = asyncio.create_task(reminders.run_dispatcher())
     log_event("server.started", public_url=get_settings().public_url)
     yield
+    dispatcher.cancel()
 
 
 app = FastAPI(title="voice-agent", lifespan=lifespan)

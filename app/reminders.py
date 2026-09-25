@@ -7,13 +7,14 @@ the channel is configured, and both only ever go to the caller's own number.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
 
-from . import db
+from . import db, notify
 from .config import Settings, get_settings
 from .logs import log_event
 
@@ -89,3 +90,37 @@ async def schedule(call_id: str | None, caller: str, kind: str, when: datetime, 
         ).lastrowid
     log_event("reminder.created", reminder_id=rid, kind=kind, status=status)
     return rid, status
+
+
+async def dispatch_due(now: datetime | None = None) -> int:
+    """Send SMS reminders that are due. Each one is claimed atomically so it goes out once."""
+    now = now or datetime.now(timezone.utc)
+    with db.connect() as conn:
+        due = conn.execute("SELECT * FROM reminders WHERE kind = 'sms' AND status = 'pending' "
+                           "AND due_at <= ?", (now.isoformat(timespec="seconds"),)).fetchall()
+    sent = 0
+    for r in due:
+        with db.connect() as conn:
+            if not conn.execute("UPDATE reminders SET status = 'sending' WHERE id = ? AND status = 'pending'",
+                                (r["id"],)).rowcount:
+                continue
+        try:
+            result = await notify.send("sms", r["caller"], "Reminder", f"Reminder: {r['message']}")
+            status = "dry-run" if result.startswith("dry-run") else "sent"
+        except Exception as e:
+            status = "failed"
+            log_event("reminder.failed", logging.ERROR, reminder_id=r["id"], error=str(e))
+        with db.connect() as conn:
+            conn.execute("UPDATE reminders SET status = ? WHERE id = ?", (status, r["id"]))
+        sent += 1
+    return sent
+
+
+async def run_dispatcher(interval_s: float = 30.0) -> None:
+    """Background loop started with the app. ponytail: single instance; polling, not a queue."""
+    while True:
+        try:
+            await dispatch_due()
+        except Exception as e:  # keep the loop alive
+            log_event("reminder.dispatch_error", logging.ERROR, error=repr(e))
+        await asyncio.sleep(interval_s)

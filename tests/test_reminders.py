@@ -82,3 +82,19 @@ async def test_bad_times_and_untrusted_callers_are_refused():
                                  args={"kind": "sms", "when": soon(), "message": "x"}), stranger)
     assert r["error"] == "That action isn't available for this caller."
     assert rows() == []
+
+
+async def test_dispatcher_sends_due_sms_once_via_outbox():
+    now = datetime.now(timezone.utc)
+    with db.connect() as conn:
+        for due, msg in ((now - timedelta(minutes=1), "due"), (now + timedelta(hours=1), "later")):
+            conn.execute("INSERT INTO reminders (caller, kind, due_at, message, status) "
+                         "VALUES ('+14155550100', 'sms', ?, ?, 'pending')",
+                         (due.isoformat(timespec="seconds"), msg))
+    assert await reminders.dispatch_due() == 1
+    assert await reminders.dispatch_due() == 0
+    with db.connect() as conn:
+        assert [tuple(r) for r in conn.execute("SELECT message, status FROM reminders ORDER BY id")] == \
+            [("due", "dry-run"), ("later", "pending")]
+        assert tuple(conn.execute("SELECT recipient, body, status FROM outbox").fetchone()) == \
+            ("+14155550100", "Reminder: due", "dry-run")
