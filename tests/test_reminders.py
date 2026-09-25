@@ -69,7 +69,7 @@ async def test_callback_uses_vapi_schedule_plan_when_configured(monkeypatch):
 
 async def test_sms_reminder_is_pending_until_due():
     r = await confirmed(kind="sms", when=soon(), message="stretch")
-    assert "text you" in r["result"]
+    assert "text you" in r["result"] and r["result"].endswith("nothing will actually be sent).")
     assert rows()[0]["status"] == "pending"
 
 

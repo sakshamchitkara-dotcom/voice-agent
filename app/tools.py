@@ -192,7 +192,8 @@ async def _schedule_reminder(a: dict, ctx: Ctx) -> str:
     rid, status = await reminders.schedule(ctx.call_id, to, kind, when, a["message"])
     local = when.astimezone(ZoneInfo(s.timezone))
     how = "call you back" if kind == "call" else "text you"
-    note = " (dry-run: recorded but nothing will actually be sent)" if status == "dry-run" else ""
+    dry = status == "dry-run" or (kind == "sms" and not notify.will_send("sms"))
+    note = " (dry-run: recorded but nothing will actually be sent)" if dry else ""
     return f"Reminder {rid} set: I'll {how} on {local:%A %B %d at %H:%M}{note}."
 
 

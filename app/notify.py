@@ -43,11 +43,17 @@ async def _twilio_send(s: Settings, to: str, body: str) -> None:
         r.raise_for_status()
 
 
+def will_send(channel: str) -> bool:
+    """True only if a message on this channel would really go out (not a dry run)."""
+    s = get_settings()
+    configured = bool(s.smtp_host) if channel == "email" else bool(s.twilio_account_sid)
+    return configured and not s.dry_run
+
+
 async def send(channel: str, to: str, subject: str, body: str) -> str:
     """Send (or dry-run) a message. Returns a short spoken-friendly status."""
     s = get_settings()
-    configured = bool(s.smtp_host) if channel == "email" else bool(s.twilio_account_sid)
-    if s.dry_run or not configured:
+    if not will_send(channel):
         _record(channel, to, subject, body, "dry-run")
         log_event("notify.dry_run", channel=channel, to=to, chars=len(body))
         return f"dry-run: {channel} to {to} recorded but not sent"
