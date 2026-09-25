@@ -120,3 +120,27 @@ async def call_detail(call_id: str) -> HTMLResponse:
         facts = [{"fact": f} for f in memory.facts_for(call["caller"], memory.MAX_FACTS_PER_CALLER)]
         parts.append(f"<h2>Memory for {escape(call['caller'])}</h2>" + table(facts, ["fact"]))
     return page(f"Call {call_id}", "".join(parts))
+
+
+@router.get("/jobs", response_class=HTMLResponse)
+async def jobs_page() -> HTMLResponse:
+    rows = q("SELECT * FROM jobs ORDER BY id DESC LIMIT 200")
+    return page("Deep tasks", table(rows, ["id", "call_id", "status", "delivered", "channel", "recipient",
+                                           "task", "result", "updated_at"],
+                                    link={"call_id": "/admin/calls/{value}"},
+                                    limit={"task": 160, "result": 300}))
+
+
+@router.get("/outbox", response_class=HTMLResponse)
+async def outbox_page() -> HTMLResponse:
+    rows = q("SELECT * FROM outbox ORDER BY id DESC LIMIT 200")
+    return page("Outbox", table(rows, ["id", "created_at", "channel", "recipient", "status", "subject", "body"],
+                                limit={"body": 300}))
+
+
+@router.get("/reminders", response_class=HTMLResponse)
+async def reminders_page() -> HTMLResponse:
+    rows = q("SELECT * FROM reminders ORDER BY id DESC LIMIT 200")
+    return page("Reminders", table(rows, ["id", "call_id", "caller", "kind", "due_at", "status",
+                                          "vapi_call_id", "message"],
+                                   link={"call_id": "/admin/calls/{value}"}))

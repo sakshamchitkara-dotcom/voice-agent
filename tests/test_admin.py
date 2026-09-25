@@ -49,3 +49,18 @@ async def test_call_detail_shows_transcript_tool_calls_and_memory(client):
     assert "&lt;script&gt;" in detail and "<script>" not in detail
     assert "add_note" in detail and "Saved note 1." in detail and "Their name is Priya." in detail
     assert client.get("/admin/calls/nope", auth=ADMIN).status_code == 404
+
+
+def test_outbox_jobs_and_reminders_pages(client):
+    with db.connect() as conn:
+        conn.execute("INSERT INTO outbox (channel, recipient, subject, body, status) "
+                     "VALUES ('sms', '+14155550100', 'Hi', 'See you Friday', 'dry-run')")
+        conn.execute("INSERT INTO jobs (call_id, task, channel, recipient, status) "
+                     "VALUES ('call-1', 'Compare e-bikes', 'email', 'me@x.io', 'running')")
+        conn.execute("INSERT INTO reminders (call_id, caller, kind, due_at, message, status) "
+                     "VALUES ('call-1', '+14155550100', 'call', '2030-01-01T10:00:00+00:00', 'bins', 'dry-run')")
+    assert "See you Friday" in client.get("/admin/outbox", auth=ADMIN).text
+    jobs = client.get("/admin/jobs", auth=ADMIN).text
+    assert "Compare e-bikes" in jobs and "/admin/calls/call-1" in jobs
+    assert "bins" in client.get("/admin/reminders", auth=ADMIN).text
+    assert client.get("/admin/outbox").status_code == 401
