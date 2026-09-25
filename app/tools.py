@@ -17,7 +17,7 @@ from typing import Any, Awaitable, Callable
 
 from . import db, jobs, llm, metrics, notify, vapi, web_tools
 from .config import get_settings
-from .logs import log_event
+from .logs import log_event, request_id
 from .security import limiter
 
 CONFIRM_TTL_S = 300
@@ -240,10 +240,26 @@ def _outcome(out: dict) -> str:
 async def run(call: vapi.ToolCall, ctx: Ctx) -> dict:
     start = time.perf_counter()
     out = await _dispatch(call, ctx)
+    elapsed = time.perf_counter() - start
     name = call.name if call.name in TOOLS else "unknown"  # bounded label values
-    tool_calls_total.inc(tool=name, outcome=_outcome(out))
-    tool_latency.observe(time.perf_counter() - start, tool=name)
+    outcome = _outcome(out)
+    tool_calls_total.inc(tool=name, outcome=outcome)
+    tool_latency.observe(elapsed, tool=name)
+    _record(call, ctx, outcome, out.get("result", out.get("error")), elapsed)
     return out
+
+
+def _record(call: vapi.ToolCall, ctx: Ctx, outcome: str, output: str, elapsed: float) -> None:
+    """Keep an audit trail of tool calls for the admin dashboard."""
+    try:
+        with db.connect() as conn:
+            conn.execute(
+                "INSERT INTO tool_calls (call_id, caller, tool, args, outcome, output, ms, request_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (ctx.call_id, ctx.caller, call.name[:100], json.dumps(call.args, default=str)[:4000],
+                 outcome, output, round(elapsed * 1000), request_id.get()))
+    except Exception as e:  # never fail a live call because the audit write failed
+        log_event("tool.record_failed", logging.ERROR, error=repr(e))
 
 
 async def _dispatch(call: vapi.ToolCall, ctx: Ctx) -> dict:

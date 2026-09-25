@@ -1,4 +1,4 @@
-"""SQLite storage: calls, notes, events, deep-task jobs, confirmations, outbox."""
+"""SQLite storage: calls, notes, events, deep-task jobs, confirmations, tool calls, outbox."""
 from __future__ import annotations
 
 import sqlite3
@@ -55,6 +55,19 @@ CREATE TABLE IF NOT EXISTS confirmations (
     created_at REAL NOT NULL,
     PRIMARY KEY (call_id, tool, args_hash)
 );
+CREATE TABLE IF NOT EXISTS tool_calls (
+    id INTEGER PRIMARY KEY,
+    call_id TEXT,
+    caller TEXT,
+    tool TEXT NOT NULL,
+    args TEXT,
+    outcome TEXT NOT NULL,
+    output TEXT,
+    ms INTEGER,
+    request_id TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS tool_calls_call ON tool_calls (call_id);
 CREATE TABLE IF NOT EXISTS outbox (
     id INTEGER PRIMARY KEY,
     channel TEXT NOT NULL,

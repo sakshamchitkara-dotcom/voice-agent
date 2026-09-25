@@ -132,3 +132,17 @@ async def test_tool_metrics_record_outcomes():
     assert 'voice_agent_tool_calls_total{tool="send_followup",outcome="confirm"} 1' in text
     assert 'voice_agent_tool_calls_total{tool="unknown",outcome="error"} 1' in text
     assert 'voice_agent_tool_duration_seconds_count{tool="add_note"} 2' in text
+
+
+async def test_tool_calls_are_recorded_for_the_audit_trail():
+    await tools.run(tc("add_note", text="buy milk"), TRUSTED)
+    await tools.run(tc("add_note", text="x"), STRANGER)
+    with db.connect() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT call_id, tool, args, outcome, output FROM tool_calls ORDER BY id")]
+    assert rows == [
+        {"call_id": "call-1", "tool": "add_note", "args": '{"text": "buy milk"}',
+         "outcome": "ok", "output": "Saved note 1."},
+        {"call_id": "call-2", "tool": "add_note", "args": '{"text": "x"}',
+         "outcome": "error", "output": "That action isn't available for this caller."},
+    ]
