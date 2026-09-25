@@ -15,7 +15,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Any, Awaitable, Callable
 
-from . import convert, db, jobs, llm, memory, metrics, notify, vapi, web_tools
+from . import convert, db, jobs, llm, memory, metrics, notify, reminders, vapi, web_tools
 from .config import get_settings
 from .logs import log_event, request_id
 from .security import limiter
@@ -176,6 +176,33 @@ async def _send_followup(a: dict, ctx: Ctx) -> str:
     return f"Done: {status}."
 
 
+def _reminder_target(a: dict, ctx: Ctx) -> tuple[str, str]:
+    if not ctx.caller:
+        raise ValueError("I can only set reminders for the number you're calling from, and I don't have it.")
+    if a.get("kind") not in ("call", "sms"):
+        raise ValueError("kind must be call or sms.")
+    return ctx.caller, a["kind"]  # never call or text arbitrary numbers
+
+
+async def _schedule_reminder(a: dict, ctx: Ctx) -> str:
+    to, kind = _reminder_target(a, ctx)
+    s = get_settings()
+    when = reminders.parse_due(a["when"], s.timezone)
+    rid, status = await reminders.schedule(ctx.call_id, to, kind, when, a["message"])
+    local = when.astimezone(ZoneInfo(s.timezone))
+    how = "call you back" if kind == "call" else "text you"
+    note = " (dry-run: recorded but nothing will actually be sent)" if status == "dry-run" else ""
+    return f"Reminder {rid} set: I'll {how} on {local:%A %B %d at %H:%M}{note}."
+
+
+def _confirm_reminder(a: dict, ctx: Ctx) -> str:
+    to, kind = _reminder_target(a, ctx)
+    tz = get_settings().timezone
+    local = reminders.parse_due(a["when"], tz).astimezone(ZoneInfo(tz))  # reject bad times up front
+    how = "call you back" if kind == "call" else "text you"
+    return f"{how} at {to} on {local:%A %B %d at %H:%M} to remind you: {a.get('message')}"
+
+
 async def _deep_task(a: dict, ctx: Ctx) -> str:
     s = get_settings()
     to = _recipient(a, ctx)
@@ -231,6 +258,14 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
          {"channel": CHANNEL, "message": {"type": "string"}, "email": EMAIL},
          ["channel", "message"], _send_followup, agentic=True,
          confirm=lambda a, c: f"send this {a.get('channel')} to {_recipient(a, c)}: {a.get('message')}"),
+    Tool("schedule_reminder",
+         "Schedule a reminder for the caller: a phone call back or an SMS at a given time. "
+         "Only ever goes to the number they are calling from.",
+         {"kind": {"type": "string", "enum": ["call", "sms"]},
+          "when": {"type": "string", "description": "ISO 8601 local date-time, e.g. 2026-09-26T15:00"},
+          "message": {"type": "string", "description": "What to remind them about"}},
+         ["kind", "when", "message"], _schedule_reminder, agentic=True,
+         spoken_start="Setting that reminder.", confirm=_confirm_reminder),
     Tool("deep_task",
          "Queue a longer research or writing task that runs after the call; results are "
          "sent by SMS or email. Use when an answer needs more than a few seconds of work.",

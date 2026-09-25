@@ -37,6 +37,9 @@ class Settings:
     vapi_voice_provider: str
     vapi_voice_id: str
     vapi_credential_id: str
+    # Private API key and number, used for scheduled reminder callbacks (POST /call).
+    vapi_api_key: str
+    vapi_phone_number_id: str
     owner_name: str
     timezone: str
     owner_email: str
@@ -72,6 +75,8 @@ def load_settings() -> Settings:
         vapi_voice_provider=e("VAPI_VOICE_PROVIDER", ""),
         vapi_voice_id=e("VAPI_VOICE_ID", ""),
         vapi_credential_id=e("VAPI_CREDENTIAL_ID", ""),
+        vapi_api_key=e("VAPI_API_KEY", ""),
+        vapi_phone_number_id=e("VAPI_PHONE_NUMBER_ID", ""),
         owner_name=e("OWNER_NAME", ""),
         timezone=e("TIMEZONE", "UTC"),
         owner_email=e("OWNER_EMAIL", ""),

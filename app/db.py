@@ -1,5 +1,5 @@
 """SQLite storage: calls, notes, events, deep-task jobs, confirmations, tool calls, memories,
-outbox."""
+reminders, outbox."""
 from __future__ import annotations
 
 import sqlite3
@@ -78,6 +78,17 @@ CREATE TABLE IF NOT EXISTS memories (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS memories_caller ON memories (caller);
+CREATE TABLE IF NOT EXISTS reminders (
+    id INTEGER PRIMARY KEY,
+    call_id TEXT,
+    caller TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    due_at TEXT NOT NULL,
+    message TEXT NOT NULL,
+    status TEXT NOT NULL,
+    vapi_call_id TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS outbox (
     id INTEGER PRIMARY KEY,
     channel TEXT NOT NULL,
