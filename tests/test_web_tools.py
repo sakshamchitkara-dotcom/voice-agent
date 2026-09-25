@@ -193,3 +193,19 @@ async def test_refresh_bypasses_cache_and_prefetch_loop_warms(monkeypatch):
     await asyncio.sleep(0.01)
     loop.cancel()
     assert calls == ["Oslo", "Oslo", "Lima"] and await fake("lima") == "Lima: 3"
+
+
+async def test_sqlite_shared_cache_serves_other_workers(monkeypatch):
+    from app.config import get_settings
+    monkeypatch.setenv("SHARED_STATE", "sqlite")
+    get_settings.cache_clear()
+    upstream = []
+
+    @web_tools.ttl_cache(60)
+    async def rate(base, quote):
+        upstream.append(base)
+        return 0.88, "2026-09-24"
+    assert await rate("USD", "EUR") == (0.88, "2026-09-24")
+    web_tools.clear_caches()  # a second worker: empty process memory, same DB_PATH
+    assert await rate("usd", "eur") == [0.88, "2026-09-24"] and upstream == ["USD"]
+    assert await rate.refresh("USD", "EUR") == (0.88, "2026-09-24") and len(upstream) == 2

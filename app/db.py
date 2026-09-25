@@ -94,6 +94,11 @@ CREATE TABLE IF NOT EXISTS rate_hits (
     ts REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS rate_hits_key ON rate_hits (key, ts);
+CREATE TABLE IF NOT EXISTS tool_cache (
+    key TEXT PRIMARY KEY,
+    expires_at REAL NOT NULL,
+    value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS outbox (
     id INTEGER PRIMARY KEY,
     channel TEXT NOT NULL,

@@ -6,6 +6,7 @@ import asyncio
 import functools
 import html
 import ipaddress
+import json
 import re
 import socket
 import time
@@ -14,7 +15,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
-from . import metrics
+from . import db, metrics
+from .config import get_settings
 
 UA = "Mozilla/5.0 (compatible; voice-agent/0.2; +https://github.com/sakshamchitkara-dotcom/voice-agent)"
 TIMEOUT = httpx.Timeout(8.0, connect=4.0)
@@ -54,7 +56,9 @@ def ttl_cache(seconds: float, maxsize: int = 256):
     across callers ("weather in Paris") should not hit the upstream API again. Concurrent
     misses for the same key share one upstream request (single-flight), so a burst of
     identical questions can't stampede the API into rate limiting us.
-    ponytail: per-process dict with FIFO eviction; move to Redis for several instances.
+    With SHARED_STATE=sqlite, values also go to the `tool_cache` table so every worker on
+    the same DB_PATH shares them (values must be JSON; tuples come back as lists).
+    ponytail: in-process dict with FIFO eviction in front of an optional sqlite table.
     """
     def deco(fn):
         store: dict[tuple, tuple[float, object]] = {}
@@ -64,6 +68,14 @@ def ttl_cache(seconds: float, maxsize: int = 256):
         def keyof(args) -> tuple:
             return tuple(" ".join(str(a).lower().split()) for a in args)
 
+        def shared_key(key: tuple) -> str:
+            return f"{fn.__name__}:{json.dumps(key)}"
+
+        def put(key: tuple, expires: float, value: object) -> None:
+            if key not in store and len(store) >= maxsize:
+                store.pop(next(iter(store)))
+            store[key] = (expires, value)
+
         @functools.wraps(fn)
         async def wrapper(*args):
             key = keyof(args)
@@ -71,6 +83,11 @@ def ttl_cache(seconds: float, maxsize: int = 256):
             if hit and hit[0] > time.monotonic():
                 cache_lookups.inc(cache=fn.__name__, result="hit")
                 return hit[1]
+            shared = get_settings().shared_state == "sqlite"
+            if shared and (row := _shared_get(shared_key(key))):
+                cache_lookups.inc(cache=fn.__name__, result="sqlite")
+                put(key, time.monotonic() + row[0] - time.time(), row[1])
+                return row[1]
             if key in inflight:
                 cache_lookups.inc(cache=fn.__name__, result="shared")
                 return await asyncio.shield(inflight[key])
@@ -85,18 +102,37 @@ def ttl_cache(seconds: float, maxsize: int = 256):
             finally:
                 inflight.pop(key, None)
             fut.set_result(value)
-            if len(store) >= maxsize:
-                store.pop(next(iter(store)))
-            store[key] = (time.monotonic() + seconds, value)
+            put(key, time.monotonic() + seconds, value)
+            if shared:
+                _shared_set(shared_key(key), value, seconds)
             return value
 
         async def refresh(*args):
             """Fetch again even if cached (prefetch loop)."""
-            store.pop(keyof(args), None)
+            store.pop(key := keyof(args), None)
+            if get_settings().shared_state == "sqlite":
+                with db.connect() as conn:
+                    conn.execute("DELETE FROM tool_cache WHERE key = ?", (shared_key(key),))
             return await wrapper(*args)
         wrapper.refresh = refresh
         return wrapper
     return deco
+
+
+def _shared_get(key: str) -> tuple[float, object] | None:
+    """(expires_at wall clock, value) from the shared sqlite cache, if fresh."""
+    with db.connect() as conn:
+        row = conn.execute("SELECT expires_at, value FROM tool_cache WHERE key = ? AND expires_at > ?",
+                           (key, time.time())).fetchone()
+    return (row[0], json.loads(row[1])) if row else None
+
+
+def _shared_set(key: str, value: object, ttl: float) -> None:
+    now = time.time()
+    with db.connect() as conn:
+        conn.execute("INSERT OR REPLACE INTO tool_cache (key, expires_at, value) VALUES (?, ?, ?)",
+                     (key, now + ttl, json.dumps(value)))
+        conn.execute("DELETE FROM tool_cache WHERE expires_at <= ?", (now,))
 
 
 def clear_caches() -> None:
