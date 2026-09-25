@@ -86,6 +86,8 @@ def test_calendar_ics_export(client, monkeypatch):
     assert "DTSTART:20300701T170000Z" in everything  # PDT in July
     assert all(len(line.encode()) <= 75 for line in everything.split("\r\n"))
     assert "\r\n x" in everything  # folded continuation line
+    odd = to_ics([{"id": 2, "title": "a\rb\x00c\td", "starts_at": "2030-07-01T10:00", "notes": "x\r\ny"}], "UTC")
+    assert "SUMMARY:a\\nbc\td\r\n" in odd and "DESCRIPTION:x\\ny\r\n" in odd  # no bare CR or NUL
 
 
 def test_analytics_page(client):

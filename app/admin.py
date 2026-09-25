@@ -5,6 +5,7 @@ HTTP Basic auth with ADMIN_USER / ADMIN_PASSWORD. With no password set the dashb
 """
 from __future__ import annotations
 
+import re
 import secrets
 from datetime import datetime, timezone
 from html import escape
@@ -201,10 +202,14 @@ async def analytics(days: int = 14) -> HTMLResponse:
         "<h2>How calls ended (all time)</h2>", table(d["reasons"], ["ended_reason", "calls"])]))
 
 
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")  # not allowed in TEXT; tab and newline are
+
+
 def _ics_text(value: str) -> str:
-    """RFC 5545 TEXT escaping."""
+    """RFC 5545 TEXT escaping. A lone CR would end the content line early in strict parsers."""
+    value = _CONTROL.sub("", value.replace("\r\n", "\n").replace("\r", "\n"))
     return (value.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
-            .replace("\r\n", "\\n").replace("\n", "\\n"))
+            .replace("\n", "\\n"))
 
 
 def _fold(line: str) -> str:
