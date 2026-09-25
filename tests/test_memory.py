@@ -39,3 +39,28 @@ def test_save_dedupes_filters_sensitive_and_caps(monkeypatch):
     memory.save(CALLER, [f"Fact number {c}." for c in "abcd"], "c2", "rules")
     assert memory.facts_for(CALLER) == ["Fact number b.", "Fact number c.", "Fact number d."]
     assert memory.forget(CALLER) == 3 and memory.facts_for(CALLER) == []
+
+
+async def test_remember_call_uses_claude_json(monkeypatch):
+    seen = {}
+
+    async def fake(prompt, system, **kw):
+        seen["prompt"] = prompt
+        return 'Sure:\n["Their daughter Mia starts school in October.", 42]'
+    monkeypatch.setattr(memory.llm, "complete", fake)
+    memory.save(CALLER, ["They live in Oakland."], "c0", "rules")
+    msg = {"artifact": {"messages": [{"role": "user", "message": "Mia starts school in October"}]}}
+    assert await memory.remember_call(CALLER, "c1", msg) == 1
+    assert "- They live in Oakland." in seen["prompt"] and "- Mia starts school" in seen["prompt"]
+    assert memory.facts_for(CALLER)[-1] == "Their daughter Mia starts school in October."
+
+
+async def test_remember_call_falls_back_to_rules(monkeypatch):
+    for reply in (None, "I can't produce JSON today"):
+        async def fake(prompt, system, **kw):
+            return reply
+        monkeypatch.setattr(memory.llm, "complete", fake)
+        msg = {"artifact": {"transcript": "AI: Hi. User: Please call me sam, I prefer texts."}}
+        await memory.remember_call(CALLER, "c1", msg)
+    assert memory.facts_for(CALLER) == ["They like to be called Sam.", "They prefer texts."]
+    assert await memory.remember_call(CALLER, "c2", {}) == 0

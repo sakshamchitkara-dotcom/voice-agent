@@ -127,3 +127,19 @@ def test_log_lines_carry_request_id():
         assert json.loads(JsonFormatter().format(rec))["request_id"] == "rid-1"
     finally:
         request_id.reset(token)
+
+
+def test_end_of_call_report_updates_memory_for_trusted_callers_only(client, monkeypatch):
+    from app import memory
+
+    async def no_claude(*a, **kw):
+        return None
+    monkeypatch.setattr(memory.llm, "complete", no_claude)
+    payload = load_fixture("end_of_call_report.json")
+    payload["message"]["artifact"]["messages"].append(
+        {"role": "user", "message": "By the way, my name is Priya."})
+    client.post("/vapi/webhook", json=payload, headers=AUTH)
+    assert memory.facts_for("+14155550100") == ["Their name is Priya."]
+    payload["message"]["call"]["customer"]["number"] = "+19995550199"
+    client.post("/vapi/webhook", json=payload, headers=AUTH)
+    assert memory.facts_for("+19995550199") == []

@@ -6,9 +6,11 @@ spoofed, so memory is private data like notes).
 """
 from __future__ import annotations
 
+import json
 import re
 
-from . import db
+from . import db, llm
+from .logs import log_event
 
 MAX_FACTS_PER_CALLER = 50
 _SENSITIVE = re.compile(r"\d[\d\s-]{5,}\d|password|passcode|\bpin\b|social security|\bssn\b|cvv", re.I)
@@ -94,3 +96,44 @@ def facts_for(caller: str | None, limit: int = 20) -> list[str]:
 def forget(caller: str) -> int:
     with db.connect() as conn:
         return conn.execute("DELETE FROM memories WHERE caller = ?", (caller,)).rowcount
+
+
+EXTRACT_SYSTEM = (
+    "You maintain long-term memory for a personal phone assistant. From what the CALLER said "
+    "in this call, extract durable facts worth knowing on future calls: their name, people in "
+    "their life, where they live or work, preferences, ongoing plans or projects, and anything "
+    "they explicitly asked you to remember. Skip one-off requests (weather, searches), anything "
+    "the assistant said, facts already known, and secrets (passwords, card or account numbers). "
+    "Write each fact as a short third-person sentence, e.g. \"Their daughter Mia starts school "
+    "in October.\" Reply with only a JSON array of strings; [] if there is nothing new."
+)
+
+
+def _parse_json_list(text: str) -> list[str] | None:
+    m = re.search(r"\[.*\]", text, re.S)
+    try:
+        data = json.loads(m.group(0)) if m else None
+    except json.JSONDecodeError:
+        return None
+    return [str(x) for x in data if isinstance(x, str)] if isinstance(data, list) else None
+
+
+async def claude_facts(lines: list[str], known: list[str]) -> list[str] | None:
+    """Facts via Claude, or None when Claude is unavailable or replies with junk."""
+    prompt = ("Already known:\n" + ("\n".join(f"- {k}" for k in known) or "(nothing)")
+              + "\n\nWhat the caller said, in order:\n" + "\n".join(f"- {line}" for line in lines))
+    text = await llm.complete(prompt[:50_000], EXTRACT_SYSTEM, effort="low", max_tokens=800)
+    return _parse_json_list(text) if text else None
+
+
+async def remember_call(caller: str, call_id: str | None, message: dict) -> int:
+    """Extract facts from an end-of-call report and store them. Returns how many were new."""
+    lines = user_lines(message)
+    if not lines:
+        return 0
+    facts, source = await claude_facts(lines, facts_for(caller, MAX_FACTS_PER_CALLER)), "claude"
+    if facts is None:
+        facts, source = rule_facts(lines), "rules"
+    added = save(caller, facts, call_id, source)
+    log_event("memory.updated", call_id=call_id, source=source, extracted=len(facts), added=added)
+    return added
