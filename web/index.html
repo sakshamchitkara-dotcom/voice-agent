@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
 <title>Voice Agent Test Call</title>
 <style>
   :root { --bg: #fafaf9; --fg: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #0f766e; }
@@ -31,7 +32,9 @@
   <div id="log" aria-live="polite"></div>
 </main>
 <script type="module">
-  import Vapi from "https://cdn.jsdelivr.net/npm/@vapi-ai/web@2.7.1/+esm";
+  import VapiModule from "https://cdn.jsdelivr.net/npm/@vapi-ai/web@2.7.1/+esm";
+  // The package ships CommonJS; jsDelivr's ESM wrapper exposes the class on .default.
+  const Vapi = VapiModule.default ?? VapiModule;
 
   const btn = document.getElementById("toggle");
   const status = document.getElementById("status");
