@@ -112,3 +112,8 @@ async def test_deep_task_queues_after_confirmation(monkeypatch):
     r = await tools.run(call, TRUSTED)
     assert r["result"] == "Queued task 7. I'll send the results by email to me@x.io after we hang up."
     assert queued == [("call-1", "+14155550100", "Compare three e-bikes under $2k", "email", "me@x.io")]
+
+
+async def test_confirmation_prompt_has_no_double_period():
+    r = await tools.run(tc("send_followup", channel="sms", message="Moved to 3pm."), TRUSTED)
+    assert "3pm.." not in r["result"] and "3pm. If they clearly say yes" in r["result"]

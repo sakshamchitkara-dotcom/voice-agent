@@ -241,7 +241,7 @@ async def run(call: vapi.ToolCall, ctx: Ctx) -> dict:
     start = time.perf_counter()
     try:
         if tool.confirm and _needs_confirmation(call, ctx):
-            action = tool.confirm(call.args, ctx)
+            action = tool.confirm(call.args, ctx).rstrip(". ")
             log_event("tool.confirmation_requested", tool=call.name, call_id=ctx.call_id)
             return vapi.result(call, f"CONFIRMATION REQUIRED. Read this back and ask the caller to "
                                      f"confirm: I'm about to {action}. If they clearly say yes, call "
