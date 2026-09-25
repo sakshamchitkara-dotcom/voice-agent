@@ -108,3 +108,22 @@ def test_web_page_and_public_config(client, monkeypatch):
     assert "@vapi-ai/web" in client.get("/").text
     cfg = client.get("/web/config").json()
     assert cfg == {"publicKey": "pub_123", "assistantId": ""}
+
+
+def test_request_id_is_generated_or_propagated(client):
+    r = client.get("/healthz")
+    assert len(r.headers["x-request-id"]) == 16
+    assert client.get("/healthz", headers={"X-Request-ID": "abc-123"}).headers["x-request-id"] == "abc-123"
+    # Junk IDs (log injection, huge values) are replaced rather than echoed.
+    assert client.get("/healthz", headers={"X-Request-ID": "a b\nc"}).headers["x-request-id"] != "a b\nc"
+
+
+def test_log_lines_carry_request_id():
+    import logging
+    from app.logs import JsonFormatter, request_id
+    token = request_id.set("rid-1")
+    try:
+        rec = logging.LogRecord("voice_agent", logging.INFO, "", 0, "x", None, None)
+        assert json.loads(JsonFormatter().format(rec))["request_id"] == "rid-1"
+    finally:
+        request_id.reset(token)

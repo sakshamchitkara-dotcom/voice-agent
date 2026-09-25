@@ -4,9 +4,12 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from contextvars import ContextVar
 from datetime import datetime, timezone
 
 logger = logging.getLogger("voice_agent")
+# Set per HTTP request by the middleware in main.py; every log line carries it.
+request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 
 class JsonFormatter(logging.Formatter):
@@ -15,6 +18,7 @@ class JsonFormatter(logging.Formatter):
             "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
             "level": record.levelname,
             "event": record.getMessage(),
+            **({"request_id": rid} if (rid := request_id.get()) else {}),
             **getattr(record, "fields", {}),
         }
         if record.exc_info:

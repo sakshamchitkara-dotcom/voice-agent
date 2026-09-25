@@ -5,6 +5,8 @@ import asyncio
 import json
 import logging
 import os
+import re
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -14,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from . import db, jobs, llm, tools, vapi
 from .assistant import build_assistant
 from .config import get_settings
-from .logs import log_event, setup_logging
+from .logs import log_event, request_id, setup_logging
 from .security import is_trusted, verify_webhook
 
 
@@ -28,6 +30,22 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="voice-agent", lifespan=lifespan)
+
+_SAFE_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    """Tag each request with an ID (reuse a sane incoming X-Request-ID) for logs and replies."""
+    incoming = request.headers.get("x-request-id", "")
+    rid = incoming if _SAFE_ID.match(incoming) else uuid.uuid4().hex[:16]
+    token = request_id.set(rid)
+    try:
+        response = await call_next(request)
+    finally:
+        request_id.reset(token)
+    response.headers["X-Request-ID"] = rid
+    return response
 
 CALL_SUMMARY_SYSTEM = ("Summarise this phone call transcript in 2-3 sentences: what the caller "
                        "wanted, what was done, and any follow-ups promised.")
