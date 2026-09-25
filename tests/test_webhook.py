@@ -89,3 +89,14 @@ def test_status_update_ended_releases_finished_jobs(client, monkeypatch):
 def test_unhandled_message_types_are_acknowledged(client):
     r = client.post("/vapi/webhook", json={"message": {"type": "speech-update"}}, headers=AUTH)
     assert r.json() == {"ok": True}
+
+
+def test_end_of_call_report_without_summary_uses_claude(client, monkeypatch):
+    async def fake(prompt, system, **kw):
+        assert "What's the weather" in prompt
+        return "Caller checked the weather."
+    monkeypatch.setattr(jobs.llm, "complete", fake)
+    payload = load_fixture("end_of_call_report.json")
+    del payload["message"]["analysis"]
+    client.post("/vapi/webhook", json=payload, headers=AUTH)
+    assert db.get_call("call-0001")["summary"] == "Caller checked the weather."

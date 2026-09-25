@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from . import db, jobs, tools, vapi
+from . import db, jobs, llm, tools, vapi
 from .assistant import build_assistant
 from .config import get_settings
 from .logs import log_event, setup_logging
@@ -27,6 +27,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="voice-agent", lifespan=lifespan)
+
+CALL_SUMMARY_SYSTEM = ("Summarise this phone call transcript in 2-3 sentences: what the caller "
+                       "wanted, what was done, and any follow-ups promised.")
+
+
+async def summarize_call(call_id: str, transcript: str) -> None:
+    """Fallback when Vapi's end-of-call-report carries no analysis summary."""
+    summary = await llm.complete(transcript[:100_000], CALL_SUMMARY_SYSTEM, effort="low", max_tokens=400)
+    if summary:
+        db.upsert_call(call_id, summary=summary)
 
 
 @app.get("/healthz")
@@ -72,13 +82,15 @@ async def vapi_webhook(request: Request, background: BackgroundTasks):
 
     if kind == "end-of-call-report" and call_id:
         artifact = message.get("artifact") or {}
+        transcript = artifact.get("transcript") or message.get("transcript")
+        summary = (message.get("analysis") or {}).get("summary") or message.get("summary")
         db.upsert_call(
             call_id, caller=caller, type=ctype, status="ended",
-            ended_reason=message.get("endedReason"),
-            transcript=artifact.get("transcript") or message.get("transcript"),
-            summary=(message.get("analysis") or {}).get("summary") or message.get("summary"),
+            ended_reason=message.get("endedReason"), transcript=transcript, summary=summary,
             started_at=message.get("startedAt"), ended_at=message.get("endedAt"),
         )
+        if transcript and not summary:
+            background.add_task(summarize_call, call_id, transcript)
         background.add_task(jobs.deliver_for_call, call_id)
         return {"ok": True}
 
