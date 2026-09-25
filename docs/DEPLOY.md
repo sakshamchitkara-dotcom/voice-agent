@@ -56,8 +56,10 @@ Bearer (or HMAC) credential in the Vapi dashboard and set `VAPI_CREDENTIAL_ID`. 
 
 ## Operating notes
 
-- Single instance only: the rate limiter and deep-task workers are in-process and sqlite is
-  local. Scale out by moving those to Redis/Postgres and a real queue.
+- One process is the default. For several workers on one machine or volume, set
+  `SHARED_STATE=sqlite` and run e.g. `uvicorn app.main:app --workers 4`: rate limits and tool
+  caches go through the shared SQLite file (WAL mode), and deep tasks and reminders are claimed
+  atomically. Metrics are per process. Past one host, move to Redis/Postgres and a real queue.
 - Logs are one JSON object per line on stdout (`event`, `request_id`, `call_id`, `tool`, `ms`, ...).
 - Scrape `GET /metrics` with Prometheus. It only has aggregate labels (no caller numbers). Set
   `METRICS_TOKEN` to require `Authorization: Bearer <token>`; in the Prometheus scrape config:

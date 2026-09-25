@@ -9,7 +9,9 @@ you the result. It remembers what you told it on earlier calls, until you tell i
 
 Vapi handles telephony, speech-to-text, the turn-by-turn conversation model and text-to-speech.
 This service is the Vapi **Server URL**: it picks the assistant config per caller, runs the tools,
-stores call records and caller memory, and serves an admin dashboard and Prometheus metrics. Claude (`claude-opus-5-5`, falling back to `claude-opus-5`) does the
+stores call records and caller memory, and serves an admin dashboard (with analytics and a
+calendar feed) and Prometheus metrics. It can greet callers in their own language, leave a
+voicemail when a reminder callback isn't answered, and email you a summary after each call. Claude (`claude-opus-5-5`, falling back to `claude-opus-5`) does the
 heavier reasoning inside tools and deep tasks.
 
 ```
@@ -49,10 +51,27 @@ second call with identical arguments and `confirmed=true`, made within 5 minutes
 call, runs the tool. The model can't skip the read-back by sending `confirmed=true` on the first
 call.
 
-**Caching.** Voice tools have to answer in well under a second, so the read-only lookups share a
-small TTL cache keyed on normalised arguments. Errors are never cached, and concurrent misses
-for the same key share one upstream request, so a burst of identical questions can't get us
-rate limited (see [Load test](#load-and-latency-test)).
+**Caching and latency.** Voice tools have to answer in well under a second, so the read-only
+lookups share a small TTL cache keyed on normalised arguments. Errors are never cached, and
+concurrent misses for the same key share one upstream request, so a burst of identical
+questions can't get us rate limited. Lookups also share one keep-alive HTTP client (connections
+kept for 90 s between turns), and geocoding is cached for a day, so a cold weather lookup is
+about 0.5 s instead of 2 s.
+
+**Holding line.** If a cached lookup still takes longer than `TOOL_SOFT_DEADLINE_S` (1.2 s), the
+server answers `STILL WORKING ...`: the assistant tells the caller it's still checking and calls
+the tool again. The lookup keeps running and fills the cache, so the retry is instant. Every
+tool also has Vapi's `request-response-delayed` message ("Still on it, one moment.") after 1 s.
+Real run against a fresh local server with a 0.3 s deadline to force it:
+
+```
+get_weather Ulaanbaatar → "STILL WORKING. The lookup is slow right now. Tell the caller you're still checking, then call get_weather again ..."   (0.34s)
+get_weather Ulaanbaatar → "Ulaanbaatar, Ulaanbaatar, Mongolia: partly cloudy, 10°C (feels like 8°C), wind 4 km/h. Today 5 to 11°C, 27% chance of rain."   (0.005s)
+```
+
+**Prefetch.** Places in `WEATHER_PREFETCH` are fetched at startup and refreshed every 9 minutes.
+When an allowlisted caller's memory says where they live, that place's weather is fetched in
+the background as soon as their `assistant-request` arrives.
 
 **Fallbacks.** If Claude is unavailable (no key, outage, refusal on both models), `fetch_url`
 reads out the start of the page and `deep_task` sends the top search results instead.
@@ -82,11 +101,60 @@ by a 30-second dispatcher loop through the normal follow-up path. Both are **dry
 in `reminders`/`outbox`, nothing placed or sent) unless `DRY_RUN=false`, and callbacks also
 need `VAPI_API_KEY` and `VAPI_PHONE_NUMBER_ID` (an existing number: nothing ever buys one).
 
+**Voicemail.** Reminder callbacks set Vapi
+[`voicemailDetection`](https://docs.vapi.ai/calls/voicemail-detection) (`{"provider": "vapi",
+"type": "audio"}`) and a `voicemailMessage` that reads the reminder after the beep. When that
+call's `end-of-call-report` arrives with `endedReason: "voicemail"`, the reminder is marked
+`voicemail` and also texted to the caller's own number (dry-run by default). An answered
+callback is marked `completed`. A redelivered report sends nothing twice.
+
 Transfers use Vapi's `transferCall` tool with **no static destinations**, so Vapi asks the
 server URL for one at call time (`transfer-destination-request`). The server answers with
 `TRANSFER_NUMBER` only when the caller is allowlisted **and** `request_transfer` was confirmed
 on this call within the last 5 minutes. Each approval works once. Anything else gets the
 documented `{"error": ...}` response and no transfer happens.
+
+## Languages
+
+`CALLER_LANGUAGES` maps E.164 prefixes to a language, longest prefix first:
+`CALLER_LANGUAGES=+34=es,+52=es,+33=fr,+1514=fr`. A matching caller's `assistant-request` reply
+greets them in that language, tells the model to speak it (translating tool results, which stay
+English), and sets a Deepgram `nova-3` transcriber with that language plus Azure's
+`multilingual-auto` voice, as in Vapi's [multilingual guide](https://docs.vapi.ai/customization/multilingual).
+Supported: `en es fr de it pt hi`. Real reply for `+34911222333` (not allowlisted):
+
+```json
+{"firstMessage":"Hola, has llamado a un asistente personal. ¿En qué puedo ayudarte?",
+ "transcriber":{"provider":"deepgram","model":"nova-3","language":"es"},
+ "voice":{"provider":"azure","voiceId":"multilingual-auto"},"metadata":{"trusted":false,"language":"es"}}
+```
+
+## Post-call email
+
+With `POST_CALL_EMAIL=true`, every `end-of-call-report` sends `OWNER_EMAIL` a plain-text summary.
+Like every message, it is only recorded in the `outbox` until `DRY_RUN=false` and SMTP is set.
+Real outbox row from replaying the fixtures:
+
+```
+Subject: Call from +14155550100 (3 min 12 s)
+
++14155550100 called at 2026-09-25T17:00:00.000Z.
+Length: 3 min 12 s · Ended: hangup
+
+Summary
+The caller asked about the weather in San Francisco and requested a text summary.
+
+What I did
+- convert
+- get_weather
+- news_headlines
+- wikipedia
+
+Follow-ups
+- Reminder (call) at 2026-09-26T22:00:00+00:00: call the dentist
+
+Details: http://localhost:8103/admin/calls/call-0001
+```
 
 ## Security
 
@@ -102,6 +170,8 @@ documented `{"error": ...}` response and no transfer happens.
   again (no loopback, private, link-local or cloud-metadata IPs).
 - **Admin dashboard**: HTTP Basic, off (404) until `ADMIN_PASSWORD` is set, constant-time
   credential check, strict CSP, all values HTML-escaped.
+- **Metrics**: open by default (aggregate labels only). Set `METRICS_TOKEN` to require
+  `Authorization: Bearer <token>`.
 - **Messages**: SMS and reminder callbacks only go to the caller's own number. Nothing is sent unless
   `DRY_RUN=false` and SMTP/Twilio are configured; every attempt goes into the `outbox` table.
 
@@ -134,19 +204,42 @@ Set `ADMIN_PASSWORD` (and optionally `ADMIN_USER`, default `admin`), then open `
 - **Call detail** (`/admin/calls/{id}`): summary, full transcript, every tool call with its
   arguments, outcome (`ok` / `error` / `confirm`), latency and request ID, plus the call's deep
   tasks, reminders, and the caller's memory.
+- **Analytics** (`/admin/analytics?days=14`): calls per day, per-tool calls, outcomes
+  (ok/error/confirm/deferred), error rate and p50/p95 latency, and how calls ended.
+- **Calendar** (`/admin/calendar.ics`, optional `?caller=+1...`): the events as an RFC 5545
+  feed with UTC times, for Apple/Google/Outlook calendars.
 - **Deep tasks**, **Outbox** (including dry-run messages) and **Reminders** pages.
+
+Real `/admin/calendar.ics` for one event at 09:00 `America/Los_Angeles`:
+
+```
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//voice-agent//calendar//EN
+CALSCALE:GREGORIAN
+X-WR-CALNAME:voice-agent
+BEGIN:VEVENT
+UID:event-1@voice-agent
+DTSTAMP:20260925T101032Z
+DTSTART:20261002T160000Z
+SUMMARY:Dentist
+DESCRIPTION:Bring the forms
+END:VEVENT
+END:VCALENDAR
+```
 
 ## Observability
 
 - Every response has an `X-Request-ID` (a well-formed incoming one is reused). Every JSON log
   line written while handling that request has the same `request_id`, and so does each stored
   tool call.
-- `GET /metrics` returns Prometheus text format, no dependencies:
+- `GET /metrics` returns Prometheus text format, no dependencies (bearer token optional, see
+  Security):
   `voice_agent_http_requests_total{method,route,status}`,
   `voice_agent_http_request_duration_seconds` (histogram, by route template),
   `voice_agent_webhook_messages_total{type}`,
-  `voice_agent_tool_calls_total{tool,outcome}`, `voice_agent_tool_duration_seconds{tool}`
-  (histogram) and `voice_agent_cache_lookups_total{cache,result=hit|miss|shared}`. Labels never
+  `voice_agent_tool_calls_total{tool,outcome=ok|error|confirm|deferred}`, `voice_agent_tool_duration_seconds{tool}`
+  (histogram) and `voice_agent_cache_lookups_total{cache,result=hit|miss|shared|sqlite}`. Labels never
   include caller numbers.
 
 ## Load and latency test
@@ -173,10 +266,26 @@ news_headlines: 200 requests, concurrency 20, 0.8s, 264.0 req/s
 latency min 3ms  p50 33ms  p95 308ms  p99 463ms  max 491ms
 ```
 
-A cold weather run is slower (p95 about 2.1 s): 10% of those requests are the first,
-uncached lookups, and each one is a geocoding call plus a forecast call. The first version of
-the cache let concurrent misses all reach Open-Meteo, which sent back 429 for 12 of 200
-requests. Single-flight fixed that: the same run now makes 5 upstream calls and gets 0 errors.
+The first version of the cache let concurrent misses all reach Open-Meteo, which sent back 429
+for 12 of 200 requests. Single-flight fixed that: the same run now makes 5 upstream calls and
+gets 0 errors.
+
+`--cold` asks for a different capital city on every request, so each one is an uncached
+geocode + forecast: the worst case. Real runs, live Open-Meteo, concurrency 4, fresh server:
+
+```
+# v0.2.0 (new client per request)
+get_weather (cold): 40 requests, concurrency 4, 21.3s, 1.9 req/s
+latency min 1894ms  p50 2096ms  p95 2221ms  p99 2461ms  max 2461ms
+errors: 0  deferred (holding line): 0
+FAIL (budget p95 <= 1500ms, no errors)
+
+# 0.3.0 (keep-alive client, geocode cache, 1.2 s holding line)
+get_weather (cold): 91 requests, concurrency 4, 12.7s, 7.2 req/s
+latency min 355ms  p50 518ms  p95 1206ms  p99 1295ms  max 1295ms
+errors: 0  deferred (holding line): 8
+PASS
+```
 
 ## Configuration
 
@@ -189,6 +298,12 @@ All settings are environment variables. `.env.example` lists every one. The main
 | `ALLOWED_CALLERS` | - | Comma-separated E.164 numbers |
 | `CLAUDE_MODEL` / `CLAUDE_FALLBACK_MODEL` | `claude-opus-5-5` / `claude-opus-5` | Tool reasoning and deep tasks |
 | `VAPI_LLM_PROVIDER` / `VAPI_LLM_MODEL` | `anthropic` / `claude-sonnet-5` | Conversation model Vapi runs; must be in Vapi's model list |
+| `TOOL_SOFT_DEADLINE_S` | `1.2` | Slow cached lookups reply with a holding line after this; `0` disables |
+| `WEATHER_PREFETCH` | - | `;`-separated places kept warm, e.g. `Oakland, California;London` |
+| `SHARED_STATE` | `memory` | `sqlite` shares rate limits and tool caches across workers on one `DB_PATH` |
+| `CALLER_LANGUAGES` | - | E.164 prefix to language, e.g. `+34=es,+33=fr` |
+| `POST_CALL_EMAIL` | `false` | Email `OWNER_EMAIL` a summary after each call (dry-run rules apply) |
+| `METRICS_TOKEN` | - | Require `Authorization: Bearer` on `/metrics` |
 | `TIMEZONE` | `UTC` | Prompt date (Vapi Liquid `"now"`), calendar and reminder times |
 | `DRY_RUN` | `true` | Set `false` and configure SMTP_* / TWILIO_* to really send |
 | `VAPI_API_KEY` / `VAPI_PHONE_NUMBER_ID` | - | Needed (with `DRY_RUN=false`) for real reminder callbacks |
@@ -208,9 +323,13 @@ The fixtures in `tests/fixtures/` are modelled on them.
 - `transfer-destination-request` → `{"destination": {"type": "number", "number", "message"}}` for an
   approved transfer, otherwise `{"error": "..."}` (response schema from Vapi's OpenAPI spec).
 - `transfer-update` → logged.
+- `assistant-request` for a caller matching `CALLER_LANGUAGES` also carries `transcriber` and
+  `voice` for that language; reminder callbacks (`POST /call`) carry `voicemailDetection` and
+  `voicemailMessage`.
 - `status-update` → stores status. On `ended` it releases any finished deep-task results for that call.
 - `end-of-call-report` → stores the transcript, ended reason and `analysis.summary`. If Vapi
-  sends no summary, Claude writes one. For allowlisted callers it also updates caller memory.
+  sends no summary, Claude writes one. For allowlisted callers it also updates caller memory. For an `outboundPhoneCall` that is one of
+  our reminder callbacks, `endedReason: "voicemail"` marks the reminder and texts it.
 
 Examples (real output from `scripts/replay_fixtures.sh` against a local server, live APIs,
 2026-09-25):
@@ -234,6 +353,14 @@ request_transfer                         → "CONFIRMATION REQUIRED. ... I'm abo
 request_transfer (confirmed=true)        → "Transfer approved. Tell the caller you're connecting them now, then call transferCall."
 transfer-destination-request             → {"destination":{"type":"number","number":"+14155550123","message":"Connecting you now."}}
 transfer-destination-request (again)     → {"error":"Transfer not approved. ..."}
+```
+
+A reminder callback that reached voicemail (`tests/fixtures/end_of_call_report_voicemail.json`,
+replayed against a live server with that reminder scheduled):
+
+```
+reminders: 1|call|voicemail|vapi-call-9
+outbox:    sms | +14155550100 | dry-run | Reminder | Reminder (also left on your voicemail): call the dentist
 ```
 
 Memory from a real `end-of-call-report` (rule fallback, no Claude key), as injected into the
@@ -260,15 +387,24 @@ Layout: `app/main.py` (routes, request IDs), `app/tools.py` (registry, guards, h
 `app/assistant.py` (Vapi config), `app/llm.py` (Claude + fallback), `app/jobs.py` (deep tasks),
 `app/web_tools.py` (weather/search/news/Wikipedia/fetch, TTL cache), `app/convert.py` (units and
 currency), `app/memory.py` (caller memory), `app/reminders.py` (callbacks and SMS reminders),
-`app/admin.py` (dashboard), `app/metrics.py` (Prometheus), `app/notify.py` (SMTP/Twilio),
+`app/admin.py` (dashboard, analytics, .ics), `app/postcall.py` (post-call email), `app/metrics.py` (Prometheus), `app/notify.py` (SMTP/Twilio),
 `app/security.py` (auth, allowlist, rate limit), `scripts/vapi_setup.py` (Vapi API),
 `scripts/loadtest.py`, `web/index.html` (browser test call). Changes are listed in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## Limits
 
-- Single instance: the rate limiter, tool caches, metrics, reminder dispatcher and deep-task
-  workers run in-process, and SQLite is a local file.
+- Several workers or instances work when they share one SQLite file (`SHARED_STATE=sqlite`,
+  same volume): rate limits and tool caches are shared, deep tasks and SMS reminders are claimed
+  atomically. Metrics stay per process, and SQLite serialises writes, so this is for a few
+  workers on one host, not a fleet. Verified with two instances on one DB: 10 alternating tool
+  calls with a limit of 5/min gave 5 answers and 5 `Too many requests`, and neither instance
+  fetched the exchange rate upstream (`cache_lookups_total{cache="fx_rate",result="sqlite"} 1`
+  on both).
+- The holding line needs the model to call the tool again; a model that ignores the
+  instruction just answers without the lookup.
+- Callers are served in one language chosen by number prefix; a caller who switches language
+  mid-call is followed by the model, but the transcriber stays on the configured language.
 - Calendar times are naive local times in one `TIMEZONE`.
 - DuckDuckGo's HTML endpoint sometimes throttles heavy use. When it does, the tool returns an error.
 - Currency conversion covers the roughly 30 currencies the ECB publishes reference rates for.
