@@ -380,6 +380,7 @@ next `assistant-request` for the same caller:
 ```sh
 pytest -q            # unit + webhook tests, no network needed
 python -m scripts.loadtest --help
+python -m scripts.workers_check   # shared state across uvicorn --workers 4, no network needed
 docker build -t voice-agent . && docker run -p 8000:8000 --env-file .env -v va-data:/data voice-agent
 ```
 
@@ -389,7 +390,7 @@ Layout: `app/main.py` (routes, request IDs), `app/tools.py` (registry, guards, h
 currency), `app/memory.py` (caller memory), `app/reminders.py` (callbacks and SMS reminders),
 `app/admin.py` (dashboard, analytics, .ics), `app/postcall.py` (post-call email), `app/metrics.py` (Prometheus), `app/notify.py` (SMTP/Twilio),
 `app/security.py` (auth, allowlist, rate limit), `scripts/vapi_setup.py` (Vapi API),
-`scripts/loadtest.py`, `web/index.html` (browser test call). Changes are listed in
+`scripts/loadtest.py`, `scripts/workers_check.py`, `web/index.html` (browser test call). Changes are listed in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## Limits
@@ -397,10 +398,18 @@ currency), `app/memory.py` (caller memory), `app/reminders.py` (callbacks and SM
 - Several workers or instances work when they share one SQLite file (`SHARED_STATE=sqlite`,
   same volume): rate limits and tool caches are shared, deep tasks and SMS reminders are claimed
   atomically. Metrics stay per process, and SQLite serialises writes, so this is for a few
-  workers on one host, not a fleet. Verified with two instances on one DB: 10 alternating tool
-  calls with a limit of 5/min gave 5 answers and 5 `Too many requests`, and neither instance
-  fetched the exchange rate upstream (`cache_lookups_total{cache="fx_rate",result="sqlite"} 1`
-  on both).
+  workers on one host, not a fleet. `python -m scripts.workers_check` starts a real
+  `uvicorn --workers 4` on a temp DB and sends every request on a new connection, so the OS
+  spreads them over the workers (the pid on each log line shows who answered). Real run, Mac mini:
+
+  ```
+  uvicorn --workers 4, SHARED_STATE=sqlite
+  PASS  distribution: 4 workers answered: pid 36715: 3, pid 36716: 10, pid 36717: 6, pid 36718: 21
+  PASS  rate limit: 5 of 40 calls allowed with a limit of 5/min
+  PASS  confirmation: 12/12 read-back + confirm pairs ran once each, 6 of them confirmed on a different worker than the read-back
+  uvicorn --workers 4, SHARED_STATE=memory
+  FAIL  rate limit: 16 of 40 calls allowed with a limit of 5/min
+  ```
 - The holding line needs the model to call the tool again; a model that ignores the
   instruction just answers without the lookup.
 - Callers are served in one language chosen by number prefix; a caller who switches language
