@@ -12,6 +12,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Any, Awaitable, Callable
 
 from . import db, jobs, llm, notify, vapi, web_tools
@@ -122,8 +123,9 @@ async def _create_event(a: dict, ctx: Ctx) -> str:
 
 
 async def _list_events(a: dict, ctx: Ctx) -> str:
-    # ponytail: naive local times compared as ISO strings; add tz handling for multi-tz users.
-    now = datetime.now().isoformat(timespec="minutes")
+    # ponytail: one owner timezone; events are naive local times compared as ISO strings.
+    now = datetime.now(ZoneInfo(get_settings().timezone)).replace(tzinfo=None)
+    now = now.isoformat(timespec="minutes")
     with db.connect() as conn:
         rows = conn.execute("SELECT title, starts_at FROM events WHERE caller = ? AND starts_at >= ? "
                             "ORDER BY starts_at LIMIT 5", (_owner(ctx), now)).fetchall()

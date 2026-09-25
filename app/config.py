@@ -38,6 +38,7 @@ class Settings:
     vapi_voice_id: str
     vapi_credential_id: str
     owner_name: str
+    timezone: str
     owner_email: str
     # Notifications. Nothing is sent unless DRY_RUN=false AND the channel is configured.
     dry_run: bool
@@ -72,6 +73,7 @@ def load_settings() -> Settings:
         vapi_voice_id=e("VAPI_VOICE_ID", ""),
         vapi_credential_id=e("VAPI_CREDENTIAL_ID", ""),
         owner_name=e("OWNER_NAME", "there"),
+        timezone=e("TIMEZONE", "UTC"),
         owner_email=e("OWNER_EMAIL", ""),
         dry_run=_bool("DRY_RUN", True),
         smtp_host=e("SMTP_HOST", ""),
