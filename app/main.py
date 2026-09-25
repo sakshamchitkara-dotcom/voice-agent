@@ -7,7 +7,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from . import db, jobs, tools, vapi
@@ -35,7 +35,7 @@ async def healthz() -> dict:
 
 
 @app.post("/vapi/webhook")
-async def vapi_webhook(request: Request):
+async def vapi_webhook(request: Request, background: BackgroundTasks):
     s = get_settings()
     body = await request.body()
     if not verify_webhook(request.headers, body, s):
@@ -61,5 +61,25 @@ async def vapi_webhook(request: Request):
         ctx = tools.Ctx(call_id=call_id, caller=caller, trusted=is_trusted(caller, ctype, s))
         results = await asyncio.gather(*(tools.run(tc, ctx) for tc in vapi.tool_calls(message)))
         return {"results": list(results)}
+
+    if kind == "status-update" and call_id:
+        status = message.get("status")
+        db.upsert_call(call_id, caller=caller, type=ctype, status=status,
+                       ended_reason=message.get("endedReason"))
+        if status == "ended":
+            background.add_task(jobs.deliver_for_call, call_id)
+        return {"ok": True}
+
+    if kind == "end-of-call-report" and call_id:
+        artifact = message.get("artifact") or {}
+        db.upsert_call(
+            call_id, caller=caller, type=ctype, status="ended",
+            ended_reason=message.get("endedReason"),
+            transcript=artifact.get("transcript") or message.get("transcript"),
+            summary=(message.get("analysis") or {}).get("summary") or message.get("summary"),
+            started_at=message.get("startedAt"), ended_at=message.get("endedAt"),
+        )
+        background.add_task(jobs.deliver_for_call, call_id)
+        return {"ok": True}
 
     return {"ok": True}

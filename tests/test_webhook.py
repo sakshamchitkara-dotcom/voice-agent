@@ -3,7 +3,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from app import db, web_tools
+from app import db, jobs, web_tools
 from app.main import app
 from app.security import limiter
 from tests.conftest import load_fixture
@@ -62,6 +62,28 @@ def test_untrusted_caller_cannot_use_agentic_tools(client):
     payload["message"]["call"]["customer"]["number"] = "+19995550199"
     r = client.post("/vapi/webhook", json=payload, headers=AUTH).json()
     assert r["results"][0]["error"] == "That action isn't available for this caller."
+
+
+def test_end_of_call_report_stores_transcript_and_summary(client):
+    assert post(client, "end_of_call_report.json").json() == {"ok": True}
+    row = db.get_call("call-0001")
+    assert row["status"] == "ended" and row["ended_reason"] == "hangup"
+    assert row["transcript"].startswith("AI: How can I help?")
+    assert row["summary"].startswith("The caller asked about the weather")
+
+
+def test_status_update_ended_releases_finished_jobs(client, monkeypatch):
+    async def fake(*a, **kw):
+        return "report"
+    monkeypatch.setattr(jobs.llm, "complete", fake)
+    db.upsert_call("call-0001", status="in-progress")
+    with db.connect() as conn:
+        conn.execute("INSERT INTO jobs (call_id, task, channel, recipient, status, result) "
+                     "VALUES ('call-0001', 't', 'sms', '+14155550100', 'done', 'report')")
+    post(client, "status_update_ended.json")
+    with db.connect() as conn:
+        assert conn.execute("SELECT delivered FROM jobs").fetchone()[0] == 1
+        assert conn.execute("SELECT status FROM outbox").fetchone()[0] == "dry-run"
 
 
 def test_unhandled_message_types_are_acknowledged(client):
