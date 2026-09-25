@@ -1,8 +1,11 @@
 """Keyless internet tools: Open-Meteo weather, DuckDuckGo search, URL fetch."""
 from __future__ import annotations
 
+import asyncio
 import html
+import ipaddress
 import re
+import socket
 from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
@@ -102,3 +105,46 @@ def format_results(results: list[dict]) -> str:
         return "No results found."
     return " | ".join(f"{i}. {r['title']} ({r['url']}): {r['snippet']}"
                       for i, r in enumerate(results, 1))
+
+
+async def _assert_public(url: str) -> None:
+    """Refuse non-http(s) URLs and hosts resolving to private/loopback/link-local IPs.
+
+    ponytail: checks DNS before connecting, so DNS rebinding between check and
+    connect is still possible; pin the resolved IP in a custom transport if that matters.
+    """
+    u = urlparse(url)
+    if u.scheme not in ("http", "https") or not u.hostname:
+        raise ValueError("only public http(s) URLs can be fetched")
+    loop = asyncio.get_running_loop()
+    try:
+        infos = await loop.getaddrinfo(u.hostname, u.port or (443 if u.scheme == "https" else 80))
+    except socket.gaierror:
+        raise ValueError(f"could not resolve {u.hostname}") from None
+    for info in infos:
+        if not ipaddress.ip_address(info[4][0]).is_global:
+            raise ValueError("that address is not publicly reachable")
+
+
+def html_to_text(page: str) -> str:
+    page = re.sub(r"(?is)<(script|style|noscript|svg|head)[^>]*>.*?</\1>", " ", page)
+    page = re.sub(r"(?s)<[^>]+>", " ", page)
+    return " ".join(html.unescape(page).split())
+
+
+async def fetch_text(url: str, max_bytes: int = 2_000_000) -> tuple[str, str]:
+    """Return (final_url, text). Follows up to 3 redirects, re-validating each hop."""
+    async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": UA}) as client:
+        for _ in range(4):
+            await _assert_public(url)
+            r = await client.get(url)
+            if r.is_redirect and "location" in r.headers:
+                url = str(r.url.join(r.headers["location"]))
+                continue
+            r.raise_for_status()
+            break
+        else:
+            raise ValueError("too many redirects")
+    body = r.content[:max_bytes].decode(r.encoding or "utf-8", errors="replace")
+    ctype = r.headers.get("content-type", "")
+    return url, (html_to_text(body) if "html" in ctype or "<html" in body[:500].lower() else body)

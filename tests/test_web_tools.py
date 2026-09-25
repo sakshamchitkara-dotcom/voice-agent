@@ -48,3 +48,29 @@ def test_parse_ddg_skips_ads_and_unwraps_redirects():
     ]
     assert web_tools.format_results(results).startswith("1. Vapi - Build")
     assert web_tools.format_results([]) == "No results found."
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1:8000/", "http://169.254.169.254/latest",
+                                 "http://[::1]/", "file:///etc/passwd", "ftp://example.com/"])
+async def test_fetch_refuses_private_and_non_http(url):
+    with pytest.raises(ValueError):
+        await web_tools.fetch_text(url)
+
+
+async def test_fetch_revalidates_redirect_targets(mock_http, monkeypatch):
+    seen = []
+
+    async def fake_check(url):
+        seen.append(url)
+        if "10.0.0.5" in url:
+            raise ValueError("that address is not publicly reachable")
+    monkeypatch.setattr(web_tools, "_assert_public", fake_check)
+    mock_http(lambda req: httpx.Response(302, headers={"location": "http://10.0.0.5/admin"}))
+    with pytest.raises(ValueError, match="not publicly reachable"):
+        await web_tools.fetch_text("https://public.example/start")
+    assert seen == ["https://public.example/start", "http://10.0.0.5/admin"]
+
+
+def test_html_to_text_drops_scripts_and_tags():
+    page = "<html><head><title>x</title></head><body><script>evil()</script><p>Hi &amp; bye</p></body>"
+    assert web_tools.html_to_text(page) == "Hi & bye"
