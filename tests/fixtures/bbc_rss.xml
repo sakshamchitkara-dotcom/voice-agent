@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0">
+    <channel>
+        <title><![CDATA[BBC News]]></title>
+        <description><![CDATA[BBC News - Technology]]></description>
+        <item>
+            <title><![CDATA[Chipmaker unveils faster AI processor]]></title>
+            <description><![CDATA[The new chip doubles performance per watt, the firm says.]]></description>
+            <link>https://www.bbc.co.uk/news/articles/example1</link>
+            <pubDate>Fri, 25 Sep 2026 08:10:00 GMT</pubDate>
+        </item>
+        <item>
+            <title><![CDATA[Satellite broadband  reaches remote islands]]></title>
+            <description><![CDATA[Residents say the connection has changed daily life.]]></description>
+            <link>https://www.bbc.co.uk/news/articles/example2</link>
+            <pubDate>Fri, 25 Sep 2026 07:00:00 GMT</pubDate>
+        </item>
+    </channel>
+</rss>

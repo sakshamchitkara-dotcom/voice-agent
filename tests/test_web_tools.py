@@ -109,3 +109,23 @@ async def test_weather_is_cached(mock_http):
     await web_tools.get_weather("Atlantis")
     await web_tools.get_weather("atlantis")
     assert len(hits) == 1
+
+
+async def test_headlines_from_bbc_rss(mock_http):
+    urls = []
+
+    def handler(req):
+        urls.append(str(req.url))
+        return httpx.Response(200, text=(FIXTURES / "bbc_rss.xml").read_text())
+    mock_http(handler)
+    out = await web_tools.headlines("technology")
+    assert out == ("BBC technology headlines: 1. Chipmaker unveils faster AI processor. "
+                   "2. Satellite broadband reaches remote islands.")
+    assert urls == ["https://feeds.bbci.co.uk/news/technology/rss.xml"]
+    assert await web_tools.headlines("technology", "chip performance") == \
+        "BBC technology headlines: 1. Chipmaker unveils faster AI processor."
+    assert await web_tools.headlines("technology", "elections") == \
+        "No technology headlines mention elections."
+    assert len(urls) == 1  # feed is cached
+    with pytest.raises(ValueError, match="Pick a news topic"):
+        await web_tools.headlines("gossip")

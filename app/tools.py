@@ -77,6 +77,10 @@ async def _search(a: dict, ctx: Ctx) -> str:
     return web_tools.format_results(await web_tools.search(a["query"]))
 
 
+async def _news(a: dict, ctx: Ctx) -> str:
+    return await web_tools.headlines(a.get("topic") or "top", a.get("query") or "")
+
+
 async def _fetch(a: dict, ctx: Ctx) -> str:
     url, text = await web_tools.fetch_text(a["url"])
     if not text:
@@ -179,6 +183,10 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
          ["location"], _weather, spoken_start="Checking the weather."),
     Tool("web_search", "Search the web and return the top results with snippets.",
          {"query": {"type": "string"}}, ["query"], _search, spoken_start="Let me look that up."),
+    Tool("news_headlines", "Latest news headlines from BBC News, optionally filtered by keywords.",
+         {"topic": {"type": "string", "enum": list(web_tools.NEWS_FEEDS)},
+          "query": {"type": "string", "description": "Optional keywords that must appear"}},
+         [], _news, spoken_start="Checking the news."),
     Tool("fetch_url", "Fetch a public web page and summarise it or answer a question about it.",
          {"url": {"type": "string"}, "question": {"type": "string"}},
          ["url"], _fetch, spoken_start="Reading that page."),

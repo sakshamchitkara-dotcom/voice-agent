@@ -1,4 +1,4 @@
-"""Keyless internet tools: Open-Meteo weather, DuckDuckGo search, URL fetch."""
+"""Keyless internet tools: Open-Meteo weather, DuckDuckGo search, BBC RSS news, URL fetch."""
 from __future__ import annotations
 
 import asyncio
@@ -8,6 +8,7 @@ import ipaddress
 import re
 import socket
 import time
+import xml.etree.ElementTree as ET
 from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
@@ -149,6 +150,47 @@ def format_results(results: list[dict]) -> str:
         return "No results found."
     return " | ".join(f"{i}. {r['title']} ({r['url']}): {r['snippet']}"
                       for i, r in enumerate(results, 1))
+
+
+NEWS_FEEDS = {
+    topic: f"https://feeds.bbci.co.uk/news/{path}rss.xml"
+    for topic, path in {
+        "top": "", "world": "world/", "uk": "uk/", "us": "world/us_and_canada/",
+        "business": "business/", "politics": "politics/", "technology": "technology/",
+        "science": "science_and_environment/", "health": "health/",
+        "entertainment": "entertainment_and_arts/",
+    }.items()
+}
+
+
+def parse_rss(xml: str) -> list[dict]:
+    root = ET.fromstring(xml)
+    return [{"title": " ".join((item.findtext("title") or "").split()),
+             "summary": " ".join((item.findtext("description") or "").split()),
+             "published": item.findtext("pubDate") or ""}
+            for item in root.iter("item")]
+
+
+@ttl_cache(300)
+async def _feed(topic: str) -> list[dict]:
+    async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": UA}) as client:
+        r = await client.get(NEWS_FEEDS[topic])
+        r.raise_for_status()
+    return parse_rss(r.text)
+
+
+async def headlines(topic: str = "top", query: str = "", limit: int = 5) -> str:
+    topic = (topic or "top").lower().strip()
+    if topic not in NEWS_FEEDS:
+        raise ValueError(f"Pick a news topic from: {', '.join(NEWS_FEEDS)}.")
+    items = await _feed(topic)
+    if query:
+        words = query.lower().split()
+        items = [i for i in items if all(w in f"{i['title']} {i['summary']}".lower() for w in words)]
+    if not items:
+        return f"No {topic} headlines" + (f" mention {query}." if query else " right now.")
+    return f"BBC {topic} headlines: " + " ".join(
+        f"{n}. {i['title']}." for n, i in enumerate(items[:limit], 1))
 
 
 async def _assert_public(url: str) -> None:
