@@ -6,9 +6,10 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from . import db, jobs, llm, tools, vapi
 from .assistant import build_assistant
@@ -37,6 +38,20 @@ async def summarize_call(call_id: str, transcript: str) -> None:
     summary = await llm.complete(transcript[:100_000], CALL_SUMMARY_SYSTEM, effort="low", max_tokens=400)
     if summary:
         db.upsert_call(call_id, summary=summary)
+
+
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+
+@app.get("/", include_in_schema=False)
+async def web_call_page() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/web/config")
+async def web_config() -> dict:
+    # The Vapi public key is designed to be exposed to browsers; never the private key.
+    return {"publicKey": os.getenv("VAPI_PUBLIC_KEY", ""), "assistantId": os.getenv("VAPI_ASSISTANT_ID", "")}
 
 
 @app.get("/healthz")

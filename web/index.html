@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice Agent Test Call</title>
+<style>
+  :root { --bg: #fafaf9; --fg: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #0f766e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1c1917; --fg: #f5f5f4; --muted: #a8a29e; --line: #44403c; --accent: #2dd4bf; }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 32px 16px; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  p { color: var(--muted); margin: 0 0 24px; }
+  button { font: inherit; padding: 10px 20px; border-radius: 8px; border: 1px solid var(--accent);
+           background: var(--accent); color: var(--bg); cursor: pointer; }
+  button[disabled] { opacity: .5; cursor: default; }
+  #status { margin-left: 12px; color: var(--muted); }
+  #log { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 12px; }
+  .line { padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .who { font-weight: 600; margin-right: 6px; }
+  .tool { color: var(--muted); font-family: ui-monospace, monospace; font-size: .85rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Voice Agent</h1>
+  <p>Browser test call using the Vapi Web SDK and the saved assistant. Allow microphone access.</p>
+  <button id="toggle" disabled>Start call</button><span id="status">Loading…</span>
+  <div id="log" aria-live="polite"></div>
+</main>
+<script type="module">
+  import Vapi from "https://cdn.jsdelivr.net/npm/@vapi-ai/web@2.7.1/+esm";
+
+  const btn = document.getElementById("toggle");
+  const status = document.getElementById("status");
+  const log = document.getElementById("log");
+  const add = (who, text, cls = "") => {
+    const div = document.createElement("div");
+    div.className = "line " + cls;
+    div.innerHTML = `<span class="who"></span><span class="text"></span>`;
+    div.querySelector(".who").textContent = who;
+    div.querySelector(".text").textContent = text;
+    log.append(div);
+    div.scrollIntoView({ block: "end" });
+  };
+
+  const cfg = await fetch("/web/config").then(r => r.json());
+  if (!cfg.publicKey || !cfg.assistantId) {
+    status.textContent = "Set VAPI_PUBLIC_KEY and VAPI_ASSISTANT_ID on the server.";
+  } else {
+    const vapi = new Vapi(cfg.publicKey);
+    let live = false;
+    status.textContent = "Ready";
+    btn.disabled = false;
+    btn.onclick = () => {
+      btn.disabled = true;
+      if (live) vapi.stop();
+      else { status.textContent = "Connecting…"; vapi.start(cfg.assistantId); }
+    };
+    vapi.on("call-start", () => { live = true; btn.disabled = false; btn.textContent = "End call"; status.textContent = "Live"; });
+    vapi.on("call-end", () => { live = false; btn.disabled = false; btn.textContent = "Start call"; status.textContent = "Ended"; });
+    vapi.on("error", e => { btn.disabled = false; status.textContent = "Error: " + (e?.error?.message || e?.message || "see console"); console.error(e); });
+    vapi.on("message", m => {
+      if (m.type === "transcript" && m.transcriptType === "final") add(m.role === "user" ? "You" : "Agent", m.transcript);
+      if (m.type === "tool-calls") for (const t of m.toolCallList || []) add("tool", `${t.function?.name ?? t.name}(${JSON.stringify(t.function?.arguments ?? t.parameters ?? {})})`, "tool");
+    });
+  }
+</script>
+</body>
+</html>

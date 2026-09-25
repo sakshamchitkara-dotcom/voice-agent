@@ -100,3 +100,11 @@ def test_end_of_call_report_without_summary_uses_claude(client, monkeypatch):
     del payload["message"]["analysis"]
     client.post("/vapi/webhook", json=payload, headers=AUTH)
     assert db.get_call("call-0001")["summary"] == "Caller checked the weather."
+
+
+def test_web_page_and_public_config(client, monkeypatch):
+    monkeypatch.setenv("VAPI_PUBLIC_KEY", "pub_123")
+    monkeypatch.setenv("VAPI_API_KEY", "private-never-exposed")
+    assert "@vapi-ai/web" in client.get("/").text
+    cfg = client.get("/web/config").json()
+    assert cfg == {"publicKey": "pub_123", "assistantId": ""}
