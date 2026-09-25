@@ -120,7 +120,7 @@ async def test_headlines_from_bbc_rss(mock_http):
     mock_http(handler)
     out = await web_tools.headlines("technology")
     assert out == ("BBC technology headlines: 1. Chipmaker unveils faster AI processor. "
-                   "2. Satellite broadband reaches remote islands.")
+                   "2. Can satellite broadband reach remote islands?")
     assert urls == ["https://feeds.bbci.co.uk/news/technology/rss.xml"]
     assert await web_tools.headlines("technology", "chip performance") == \
         "BBC technology headlines: 1. Chipmaker unveils faster AI processor."

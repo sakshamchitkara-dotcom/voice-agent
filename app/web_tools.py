@@ -191,7 +191,8 @@ async def headlines(topic: str = "top", query: str = "", limit: int = 5) -> str:
     if not items:
         return f"No {topic} headlines" + (f" mention {query}." if query else " right now.")
     return f"BBC {topic} headlines: " + " ".join(
-        f"{n}. {i['title']}." for n, i in enumerate(items[:limit], 1))
+        f"{n}. {i['title'].rstrip('.')}{'' if i['title'][-1:] in '?!' else '.'}"
+        for n, i in enumerate(items[:limit], 1))
 
 
 @ttl_cache(3600)
