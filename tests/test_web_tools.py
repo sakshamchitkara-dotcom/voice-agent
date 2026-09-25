@@ -129,3 +129,20 @@ async def test_headlines_from_bbc_rss(mock_http):
     assert len(urls) == 1  # feed is cached
     with pytest.raises(ValueError, match="Pick a news topic"):
         await web_tools.headlines("gossip")
+
+
+async def test_wikipedia_lookup(mock_http):
+    params = []
+
+    def handler(req):
+        params.append(dict(req.url.params))
+        if req.url.params["gsrsearch"] == "zzqx":
+            return httpx.Response(200, json={"batchcomplete": True})
+        return httpx.Response(200, json={"query": {"pages": [{
+            "pageid": 974, "title": "Ada Lovelace",
+            "extract": "Augusta Ada King, Countess of Lovelace, was an English\nmathematician."}]}})
+    mock_http(handler)
+    assert await web_tools.wikipedia("ada lovelace") == (
+        "From Wikipedia, Ada Lovelace: Augusta Ada King, Countess of Lovelace, was an English mathematician.")
+    assert params[0]["generator"] == "search" and params[0]["exintro"] == "1"
+    assert await web_tools.wikipedia("zzqx") == "Wikipedia has no article matching zzqx."

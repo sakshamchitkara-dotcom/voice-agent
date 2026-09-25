@@ -81,6 +81,10 @@ async def _news(a: dict, ctx: Ctx) -> str:
     return await web_tools.headlines(a.get("topic") or "top", a.get("query") or "")
 
 
+async def _wikipedia(a: dict, ctx: Ctx) -> str:
+    return await web_tools.wikipedia(a["topic"])
+
+
 async def _fetch(a: dict, ctx: Ctx) -> str:
     url, text = await web_tools.fetch_text(a["url"])
     if not text:
@@ -187,6 +191,9 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
          {"topic": {"type": "string", "enum": list(web_tools.NEWS_FEEDS)},
           "query": {"type": "string", "description": "Optional keywords that must appear"}},
          [], _news, spoken_start="Checking the news."),
+    Tool("wikipedia", "Look up a person, place, thing or concept on Wikipedia and get the "
+         "article's opening summary. Better than web_search for encyclopedic facts.",
+         {"topic": {"type": "string"}}, ["topic"], _wikipedia, spoken_start="Looking that up."),
     Tool("fetch_url", "Fetch a public web page and summarise it or answer a question about it.",
          {"url": {"type": "string"}, "question": {"type": "string"}},
          ["url"], _fetch, spoken_start="Reading that page."),

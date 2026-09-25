@@ -1,4 +1,5 @@
-"""Keyless internet tools: Open-Meteo weather, DuckDuckGo search, BBC RSS news, URL fetch."""
+"""Keyless internet tools: Open-Meteo weather, DuckDuckGo search, BBC RSS news, Wikipedia,
+URL fetch."""
 from __future__ import annotations
 
 import asyncio
@@ -191,6 +192,23 @@ async def headlines(topic: str = "top", query: str = "", limit: int = 5) -> str:
         return f"No {topic} headlines" + (f" mention {query}." if query else " right now.")
     return f"BBC {topic} headlines: " + " ".join(
         f"{n}. {i['title']}." for n, i in enumerate(items[:limit], 1))
+
+
+@ttl_cache(3600)
+async def wikipedia(topic: str) -> str:
+    """Intro of the best-matching English Wikipedia article (MediaWiki action API)."""
+    async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": UA}) as client:
+        r = await client.get("https://en.wikipedia.org/w/api.php", params={
+            "action": "query", "format": "json", "formatversion": 2, "redirects": 1,
+            "generator": "search", "gsrsearch": topic, "gsrlimit": 1,
+            "prop": "extracts", "exintro": 1, "explaintext": 1, "exsentences": 4,
+        })
+        r.raise_for_status()
+    pages = (r.json().get("query") or {}).get("pages") or []
+    if not pages or not pages[0].get("extract"):
+        return f"Wikipedia has no article matching {topic}."
+    page = pages[0]
+    return f"From Wikipedia, {page['title']}: {' '.join(page['extract'].split())}"
 
 
 async def _assert_public(url: str) -> None:
