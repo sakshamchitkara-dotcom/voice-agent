@@ -1,6 +1,6 @@
 [project]
 name = "voice-agent"
-version = "0.2.0"
+version = "0.3.0"
 description = "Phone-callable AI voice assistant on Vapi with agentic tools, backed by Claude"
 readme = "README.md"
 requires-python = ">=3.10"

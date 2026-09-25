@@ -4,6 +4,42 @@ All notable changes to this project. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-09-25
+
+### Added
+- **Holding line for slow lookups**: cached lookup tools that take longer than
+  `TOOL_SOFT_DEADLINE_S` (1.2 s) reply `STILL WORKING ...` so the assistant tells the caller it's
+  still checking and asks again; the lookup finishes in the background and the retry is served
+  from cache. Every tool also has Vapi's `request-response-delayed` message after 1 s. New tool
+  outcome: `deferred`.
+- **Weather prefetch**: `WEATHER_PREFETCH` places are fetched at startup and refreshed every 9
+  minutes, and a trusted caller's remembered home is fetched when their call starts.
+- **Shared state across workers** (`SHARED_STATE=sqlite`): rate limits (`rate_hits`) and tool
+  caches (`tool_cache`) live in the SQLite file, which now runs in WAL mode with a busy timeout.
+- **Per-caller language** (`CALLER_LANGUAGES`, e.g. `+34=es`): greeting, prompt, Deepgram
+  transcriber language and Azure multilingual voice for es, fr, de, it, pt and hi.
+- **Voicemail on reminder callbacks**: `voicemailDetection` and `voicemailMessage` on the
+  callback assistant; an `end-of-call-report` with `endedReason: "voicemail"` marks the reminder
+  and texts it too. Answered callbacks are marked `completed`.
+- **Post-call email** (`POST_CALL_EMAIL=true`): a plain-text summary to `OWNER_EMAIL` after
+  every call, through the dry-run-by-default outbox.
+- Admin **analytics** page (calls per day, per-tool outcomes, error rate, p50/p95 latency,
+  ended reasons) and **`/admin/calendar.ics`** export (RFC 5545, UTC times).
+- `METRICS_TOKEN`: optional bearer token for `/metrics`.
+- `scripts/loadtest.py --cold`: a different city per request, to measure uncached lookups.
+- Voicemail `end-of-call-report` fixture, added to the replay script.
+
+### Changed
+- Lookup tools share one keep-alive HTTP client (connections kept 90 s) and geocoding is
+  cached for 24 h. Cold weather p95 went from 2221 ms to 1206 ms in the `--cold` load test.
+- `cache_lookups_total` has a `sqlite` result label.
+
+### Fixed
+- Deep tasks are claimed atomically, so several workers never run the same job twice.
+- Calendar times with an offset or `Z` are converted to local time instead of being read back
+  hours off (and `Z` works on Python 3.10).
+- Post-call emails describe outbound calls (reminder callbacks) as calls *to* the number.
+
 ## [0.2.0] - 2026-09-25
 
 ### Added

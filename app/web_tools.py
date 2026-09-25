@@ -18,7 +18,7 @@ import httpx
 from . import db, metrics
 from .config import get_settings
 
-UA = "Mozilla/5.0 (compatible; voice-agent/0.2; +https://github.com/sakshamchitkara-dotcom/voice-agent)"
+UA = "Mozilla/5.0 (compatible; voice-agent/0.3; +https://github.com/sakshamchitkara-dotcom/voice-agent)"
 TIMEOUT = httpx.Timeout(8.0, connect=4.0)
 
 cache_lookups = metrics.Counter("voice_agent_cache_lookups_total", "Tool cache lookups.",
