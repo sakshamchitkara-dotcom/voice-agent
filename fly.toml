@@ -1,0 +1,27 @@
+# fly launch --no-deploy --copy-config && fly volumes create data --size 1
+# fly secrets set VAPI_WEBHOOK_SECRET=... ANTHROPIC_API_KEY=... ALLOWED_CALLERS=+1...
+app = "voice-agent"
+primary_region = "sjc"
+
+[env]
+  PORT = "8000"
+  DB_PATH = "/data/voice_agent.db"
+
+[mounts]
+  source = "data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  # Keep one machine warm: a cold start can blow Vapi's 7.5s assistant-request budget,
+  # and deep tasks run in-process.
+  auto_stop_machines = "off"
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/healthz"
+    timeout = "3s"
