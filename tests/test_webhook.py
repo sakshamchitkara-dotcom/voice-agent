@@ -118,13 +118,15 @@ def test_request_id_is_generated_or_propagated(client):
     assert client.get("/healthz", headers={"X-Request-ID": "a b\nc"}).headers["x-request-id"] != "a b\nc"
 
 
-def test_log_lines_carry_request_id():
+def test_log_lines_carry_request_id_and_pid():
     import logging
+    import os
     from app.logs import JsonFormatter, request_id
     token = request_id.set("rid-1")
     try:
         rec = logging.LogRecord("voice_agent", logging.INFO, "", 0, "x", None, None)
-        assert json.loads(JsonFormatter().format(rec))["request_id"] == "rid-1"
+        line = json.loads(JsonFormatter().format(rec))
+        assert line["request_id"] == "rid-1" and line["pid"] == os.getpid()
     finally:
         request_id.reset(token)
 

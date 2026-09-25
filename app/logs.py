@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -18,6 +19,7 @@ class JsonFormatter(logging.Formatter):
             "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
             "level": record.levelname,
             "event": record.getMessage(),
+            "pid": os.getpid(),  # tells uvicorn --workers apart
             **({"request_id": rid} if (rid := request_id.get()) else {}),
             **getattr(record, "fields", {}),
         }
