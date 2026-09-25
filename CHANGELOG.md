@@ -4,6 +4,21 @@ All notable changes to this project. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-09-25
+
+### Added
+- `scripts/workers_check.py`: starts a real `uvicorn --workers 4` on a temp DB, spreads tool
+  calls over the workers (a new connection per request) and checks that the rate limit and
+  read-back confirmations hold across them. CI runs it on Linux, and also checks that it fails
+  with `SHARED_STATE=memory`.
+- Every JSON log line carries the worker `pid`.
+
+### Fixed
+- Several workers starting at once on a fresh SQLite file no longer crash with "database is
+  locked" (the switch to WAL ignores the busy timeout; `init_db` now retries).
+- The `.ics` feed drops control characters and turns a lone CR into an escaped newline, as
+  RFC 5545 TEXT requires.
+
 ## [0.3.0] - 2026-09-25
 
 ### Added
