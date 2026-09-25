@@ -1,0 +1,12 @@
+{
+  "message": {
+    "type": "status-update",
+    "status": "ended",
+    "endedReason": "customer-ended-call",
+    "call": {
+      "id": "call-0001",
+      "type": "inboundPhoneCall",
+      "customer": {"number": "+14155550100"}
+    }
+  }
+}

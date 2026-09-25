@@ -1,0 +1,20 @@
+{
+  "message": {
+    "type": "tool-calls",
+    "call": {
+      "id": "call-0001",
+      "type": "inboundPhoneCall",
+      "customer": {"number": "+14155550100"}
+    },
+    "toolCallList": [
+      {
+        "id": "call_VaJOd8ZeZgWCEHDYomyCPfwN",
+        "type": "function",
+        "function": {
+          "name": "send_followup",
+          "arguments": "{\"channel\": \"sms\", \"message\": \"Summary: dentist moved to Friday 3pm.\"}"
+        }
+      }
+    ]
+  }
+}

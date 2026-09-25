@@ -1,0 +1,19 @@
+{
+  "message": {
+    "type": "tool-calls",
+    "call": {
+      "id": "call-0002",
+      "type": "inboundPhoneCall",
+      "customer": {"number": "+19995550199"}
+    },
+    "toolWithToolCallList": [
+      {
+        "name": "web_search",
+        "toolCall": {"id": "abc123", "parameters": {"query": "Vapi voice AI platform"}}
+      }
+    ],
+    "toolCallList": [
+      {"id": "abc123", "name": "web_search", "parameters": {"query": "Vapi voice AI platform"}}
+    ]
+  }
+}

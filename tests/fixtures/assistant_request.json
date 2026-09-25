@@ -1,0 +1,15 @@
+{
+  "message": {
+    "type": "assistant-request",
+    "call": {
+      "id": "call-0001",
+      "orgId": "org-123",
+      "type": "inboundPhoneCall",
+      "status": "ringing",
+      "phoneNumberId": "pn-123",
+      "customer": {"number": "+14155550100"}
+    },
+    "phoneNumber": {"id": "pn-123", "number": "+14155559999"},
+    "customer": {"number": "+14155550100"}
+  }
+}

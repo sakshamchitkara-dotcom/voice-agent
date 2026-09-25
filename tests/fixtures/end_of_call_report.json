@@ -1,0 +1,24 @@
+{
+  "message": {
+    "type": "end-of-call-report",
+    "endedReason": "hangup",
+    "startedAt": "2026-09-25T17:00:00.000Z",
+    "endedAt": "2026-09-25T17:03:12.000Z",
+    "call": {
+      "id": "call-0001",
+      "type": "inboundPhoneCall",
+      "customer": {"number": "+14155550100"}
+    },
+    "analysis": {
+      "summary": "The caller asked about the weather in San Francisco and requested a text summary."
+    },
+    "artifact": {
+      "recording": {"stereoUrl": "https://storage.vapi.ai/example-stereo.wav"},
+      "transcript": "AI: How can I help? User: What's the weather in San Francisco?",
+      "messages": [
+        {"role": "assistant", "message": "How can I help?"},
+        {"role": "user", "message": "What's the weather in San Francisco?"}
+      ]
+    }
+  }
+}
