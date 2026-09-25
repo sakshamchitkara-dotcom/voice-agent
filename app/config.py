@@ -72,7 +72,7 @@ def load_settings() -> Settings:
         vapi_voice_provider=e("VAPI_VOICE_PROVIDER", ""),
         vapi_voice_id=e("VAPI_VOICE_ID", ""),
         vapi_credential_id=e("VAPI_CREDENTIAL_ID", ""),
-        owner_name=e("OWNER_NAME", "there"),
+        owner_name=e("OWNER_NAME", ""),
         timezone=e("TIMEZONE", "UTC"),
         owner_email=e("OWNER_EMAIL", ""),
         dry_run=_bool("DRY_RUN", True),

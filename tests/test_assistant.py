@@ -33,3 +33,13 @@ def test_prompt_uses_vapi_liquid_date_and_credential_id():
     assert '{{"now" | date: "%A, %B %d, %Y, %H:%M", "Europe/London"}}' in prompt
     assert a["server"] == {"url": "https://agent.example.com/vapi/webhook", "timeoutSeconds": 20,
                            "credentialId": "cred_1"}
+
+
+def test_owner_name_wording():
+    s = get_settings()
+    a = build_assistant(replace(s, owner_name=""), trusted=True)
+    assert a["firstMessage"] == "Hey, what can I do for you?"
+    assert a["model"]["messages"][0]["content"].startswith("You are a personal voice assistant")
+    a = build_assistant(replace(s, owner_name="Sam"), trusted=True)
+    assert a["firstMessage"] == "Hey Sam, what can I do for you?"
+    assert a["model"]["messages"][0]["content"].startswith("You are Sam's personal voice assistant")

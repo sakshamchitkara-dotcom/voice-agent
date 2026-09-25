@@ -4,7 +4,7 @@ from __future__ import annotations
 from .config import Settings
 from .tools import TOOLS
 
-SYSTEM_PROMPT = """You are {owner}'s personal voice assistant, speaking on a phone call.
+SYSTEM_PROMPT = """You are {owner} personal voice assistant, speaking on a phone call.
 
 Now: {{{{"now" | date: "%A, %B %d, %Y, %H:%M", "{tz}"}}}} ({tz}).
 
@@ -54,11 +54,13 @@ def tool_defs(s: Settings, trusted: bool) -> list[dict]:
 
 
 def build_assistant(s: Settings, trusted: bool, name: str = "Voice Agent") -> dict:
-    prompt = SYSTEM_PROMPT.format(owner=s.owner_name, tz=s.timezone,
+    owner = f"{s.owner_name}'s" if s.owner_name else "a"
+    hey = f"Hey {s.owner_name}," if s.owner_name else "Hey,"
+    prompt = SYSTEM_PROMPT.format(owner=owner, tz=s.timezone,
                                   agentic=AGENTIC_ON if trusted else AGENTIC_OFF)
     assistant: dict = {
         "name": name,
-        "firstMessage": (f"Hey {s.owner_name}, what can I do for you?" if trusted
+        "firstMessage": (f"{hey} what can I do for you?" if trusted
                          else "Hi, you've reached a personal assistant. How can I help?"),
         "model": {
             "provider": s.vapi_llm_provider,
