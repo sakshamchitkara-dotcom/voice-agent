@@ -79,7 +79,7 @@ def test_calendar_ics_export(client, monkeypatch):
     r = client.get("/admin/calendar.ics", params={"caller": "+14155550100"}, auth=ADMIN)
     assert r.headers["content-type"] == "text/calendar; charset=utf-8"
     assert "DTSTART:20300103T170000Z\r\n" in r.text  # 09:00 PST = 17:00 UTC
-    assert "SUMMARY:Dentist\; bring forms\\, card\r\n" in r.text and "DESCRIPTION:Line 1\\nLine 2" in r.text
+    assert "SUMMARY:Dentist\\; bring forms\\, card\r\n" in r.text and "DESCRIPTION:Line 1\\nLine 2" in r.text
     assert "Other" not in r.text and r.text.startswith("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n")
     everything = to_ics([{"id": 1, "title": "x" * 200, "starts_at": "2030-07-01T10:00", "notes": None}],
                         "America/Los_Angeles", now=datetime(2030, 1, 1, tzinfo=timezone.utc))
