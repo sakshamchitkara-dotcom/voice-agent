@@ -6,12 +6,15 @@ HTTP Basic auth with ADMIN_USER / ADMIN_PASSWORD. With no password set the dashb
 from __future__ import annotations
 
 import secrets
+from datetime import datetime, timezone
 from html import escape
 from typing import Iterable
 from urllib.parse import quote
 
+from zoneinfo import ZoneInfo
+
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from . import db, memory
@@ -53,6 +56,7 @@ def page(title: str, body: str) -> HTMLResponse:
             f"content='width=device-width,initial-scale=1'><title>{escape(title)} · voice-agent</title>"
             f"<style>{CSS}</style></head><body><nav><a href='/admin'>Calls</a><a href='/admin/jobs'>Deep tasks</a>"
             f"<a href='/admin/outbox'>Outbox</a><a href='/admin/reminders'>Reminders</a>"
+            f"<a href='/admin/calendar.ics'>Calendar (.ics)</a>"
             f"<a href='/metrics'>Metrics</a></nav><h1>{escape(title)}</h1>{body}</body></html>")
     return HTMLResponse(html, headers={
         "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
@@ -144,3 +148,50 @@ async def reminders_page() -> HTMLResponse:
     return page("Reminders", table(rows, ["id", "call_id", "caller", "kind", "due_at", "status",
                                           "vapi_call_id", "message"],
                                    link={"call_id": "/admin/calls/{value}"}))
+
+
+def _ics_text(value: str) -> str:
+    """RFC 5545 TEXT escaping."""
+    return (value.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
+            .replace("\r\n", "\\n").replace("\n", "\\n"))
+
+
+def _fold(line: str) -> str:
+    """RFC 5545 lines are at most 75 octets; continuation lines start with a space."""
+    out, cur = [], b""
+    for ch in line:
+        b = ch.encode()
+        if len(cur) + len(b) > (75 if not out else 74):
+            out.append(cur.decode())
+            cur = b""
+        cur += b
+    out.append(cur.decode())
+    return "\r\n ".join(out)
+
+
+def to_ics(rows: Iterable, tz: str, now: datetime | None = None) -> str:
+    """Events (naive local times in tz) as an iCalendar feed with UTC times."""
+    stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%dT%H%M%SZ")
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//voice-agent//calendar//EN",
+             "CALSCALE:GREGORIAN", "X-WR-CALNAME:voice-agent"]
+    for r in rows:
+        start = datetime.fromisoformat(r["starts_at"]).replace(tzinfo=ZoneInfo(tz))
+        lines += ["BEGIN:VEVENT", f"UID:event-{r['id']}@voice-agent", f"DTSTAMP:{stamp}",
+                  f"DTSTART:{start.astimezone(timezone.utc):%Y%m%dT%H%M%SZ}",
+                  f"SUMMARY:{_ics_text(r['title'])}"]
+        if r["notes"]:
+            lines.append(f"DESCRIPTION:{_ics_text(r['notes'])}")
+        lines.append("END:VEVENT")
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(_fold(line) for line in lines) + "\r\n"
+
+
+@router.get("/calendar.ics")
+async def calendar_ics(caller: str | None = None) -> Response:
+    """Every event (or one caller's with ?caller=+1...) for import into a calendar app."""
+    sql, args = "SELECT * FROM events", ()
+    if caller:
+        sql, args = sql + " WHERE caller = ?", (caller,)
+    body = to_ics(q(sql + " ORDER BY starts_at", *args), get_settings().timezone)
+    return Response(body, media_type="text/calendar; charset=utf-8", headers={
+        "Content-Disposition": 'attachment; filename="voice-agent.ics"', "Cache-Control": "no-store"})

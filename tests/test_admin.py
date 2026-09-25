@@ -64,3 +64,25 @@ def test_outbox_jobs_and_reminders_pages(client):
     assert "Compare e-bikes" in jobs and "/admin/calls/call-1" in jobs
     assert "bins" in client.get("/admin/reminders", auth=ADMIN).text
     assert client.get("/admin/outbox").status_code == 401
+
+
+def test_calendar_ics_export(client, monkeypatch):
+    from datetime import datetime, timezone
+    from app.admin import to_ics
+    monkeypatch.setenv("TIMEZONE", "America/Los_Angeles")
+    get_settings.cache_clear()
+    with db.connect() as conn:
+        conn.execute("INSERT INTO events (caller, title, starts_at, notes) VALUES "
+                     "('+14155550100', 'Dentist; bring forms, card', '2030-01-03T09:00', 'Line 1\nLine 2')")
+        conn.execute("INSERT INTO events (caller, title, starts_at) VALUES ('+19995550199', 'Other', '2030-07-01T10:00')")
+    assert client.get("/admin/calendar.ics").status_code == 401
+    r = client.get("/admin/calendar.ics", params={"caller": "+14155550100"}, auth=ADMIN)
+    assert r.headers["content-type"] == "text/calendar; charset=utf-8"
+    assert "DTSTART:20300103T170000Z\r\n" in r.text  # 09:00 PST = 17:00 UTC
+    assert "SUMMARY:Dentist\; bring forms\\, card\r\n" in r.text and "DESCRIPTION:Line 1\\nLine 2" in r.text
+    assert "Other" not in r.text and r.text.startswith("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n")
+    everything = to_ics([{"id": 1, "title": "x" * 200, "starts_at": "2030-07-01T10:00", "notes": None}],
+                        "America/Los_Angeles", now=datetime(2030, 1, 1, tzinfo=timezone.utc))
+    assert "DTSTART:20300701T170000Z" in everything  # PDT in July
+    assert all(len(line.encode()) <= 75 for line in everything.split("\r\n"))
+    assert "\r\n x" in everything  # folded continuation line
