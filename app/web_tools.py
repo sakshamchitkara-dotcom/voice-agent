@@ -35,7 +35,8 @@ def http() -> httpx.AsyncClient:
     loop = asyncio.get_running_loop()
     if _client is None or _client[0] is not loop or _client[1].is_closed:
         _client = (loop, httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": UA},
-                                           limits=httpx.Limits(max_keepalive_connections=20)))
+                                           limits=httpx.Limits(max_keepalive_connections=20,
+                                                               keepalive_expiry=90)))
     return _client[1]
 
 
