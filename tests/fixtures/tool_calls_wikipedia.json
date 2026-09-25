@@ -1,0 +1,24 @@
+{
+  "message": {
+    "timestamp": 1758790200000,
+    "type": "tool-calls",
+    "call": {
+      "id": "call-0001",
+      "orgId": "org-123",
+      "type": "inboundPhoneCall",
+      "status": "in-progress",
+      "customer": {
+        "number": "+14155550100"
+      }
+    },
+    "toolCallList": [
+      {
+        "id": "toolu_01Hn4bYqGf3m6gXcT7kQwZpA",
+        "name": "wikipedia",
+        "parameters": {
+          "topic": "Ada Lovelace"
+        }
+      }
+    ]
+  }
+}

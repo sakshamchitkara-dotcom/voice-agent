@@ -189,3 +189,21 @@ def test_transfer_update_is_acknowledged(client):
     msg = {"message": {"type": "transfer-update", "call": {"id": "call-0001"},
                        "destination": {"type": "number", "number": "+14155550123"}}}
     assert client.post("/vapi/webhook", json=msg, headers=AUTH).json() == {"ok": True}
+
+
+@pytest.mark.parametrize("fixture,name,fn,expected", [
+    ("tool_calls_convert.json", "convert", ("convert", "convert"), "250 USD is about"),
+    ("tool_calls_wikipedia.json", "wikipedia", ("web_tools", "wikipedia"), "From Wikipedia"),
+    ("tool_calls_news.json", "news_headlines", ("web_tools", "headlines"), "BBC technology"),
+])
+def test_new_tool_fixtures_round_trip(client, monkeypatch, fixture, name, fn, expected):
+    from app import convert as convert_mod
+
+    async def fake(*args):
+        return {"convert": "250 USD is about 219.94 EUR.", "wikipedia": "From Wikipedia, Ada.",
+                "headlines": "BBC technology headlines: 1. X."}[fn[1]]
+    monkeypatch.setattr({"convert": convert_mod, "web_tools": web_tools}[fn[0]], fn[1], fake)
+    body = post(client, fixture).json()
+    tc = load_fixture(fixture)["message"]["toolCallList"][0]
+    assert body["results"][0]["name"] == name and body["results"][0]["toolCallId"] == tc["id"]
+    assert body["results"][0]["result"].startswith(expected)

@@ -1,0 +1,25 @@
+{
+  "message": {
+    "timestamp": 1758790200000,
+    "type": "tool-calls",
+    "call": {
+      "id": "call-0001",
+      "orgId": "org-123",
+      "type": "inboundPhoneCall",
+      "status": "in-progress",
+      "customer": {
+        "number": "+14155550100"
+      }
+    },
+    "toolCallList": [
+      {
+        "id": "call_5kKhFv0qL8dxNdrFzUVaLoBW",
+        "type": "function",
+        "function": {
+          "name": "convert",
+          "arguments": "{\"amount\": 250, \"from_unit\": \"USD\", \"to_unit\": \"EUR\"}"
+        }
+      }
+    ]
+  }
+}
