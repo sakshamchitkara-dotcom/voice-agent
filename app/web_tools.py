@@ -155,19 +155,22 @@ WMO = {
 }
 
 
+@ttl_cache(86400)  # coordinates don't change; after the weather TTL only the forecast is fetched
+async def geocode(location: str) -> dict | None:
+    r = await http().get("https://geocoding-api.open-meteo.com/v1/search",
+                         params={"name": location, "count": 1, "language": "en", "format": "json"})
+    r.raise_for_status()
+    places = r.json().get("results") or []
+    return {k: places[0].get(k) for k in ("name", "admin1", "country", "latitude", "longitude")} \
+        if places else None
+
+
 @ttl_cache(600)
 async def get_weather(location: str) -> str:
-    client = http()
-    geo = await client.get(
-        "https://geocoding-api.open-meteo.com/v1/search",
-        params={"name": location, "count": 1, "language": "en", "format": "json"},
-    )
-    geo.raise_for_status()
-    places = geo.json().get("results") or []
-    if not places:
+    p = await geocode(location)
+    if p is None:
         return f"I couldn't find a place called {location}."
-    p = places[0]
-    wx = await client.get(
+    wx = await http().get(
         "https://api.open-meteo.com/v1/forecast",
         params={
             "latitude": p["latitude"],

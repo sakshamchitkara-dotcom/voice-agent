@@ -115,7 +115,7 @@ def load_settings() -> Settings:
         allowed_callers=_list("ALLOWED_CALLERS"),
         allow_web_agentic=_bool("ALLOW_WEB_AGENTIC"),
         rate_limit_per_minute=int(e("RATE_LIMIT_PER_MINUTE", "20")),
-        tool_soft_deadline_s=float(e("TOOL_SOFT_DEADLINE_S", "1.5")),
+        tool_soft_deadline_s=float(e("TOOL_SOFT_DEADLINE_S", "1.2")),
         weather_prefetch=tuple(x.strip() for x in e("WEATHER_PREFETCH", "").split(";") if x.strip()),
         deep_tasks_per_hour=int(e("DEEP_TASKS_PER_HOUR", "3")),
         claude_model=e("CLAUDE_MODEL", "claude-opus-5-5"),

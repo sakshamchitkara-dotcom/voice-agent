@@ -209,3 +209,21 @@ async def test_sqlite_shared_cache_serves_other_workers(monkeypatch):
     web_tools.clear_caches()  # a second worker: empty process memory, same DB_PATH
     assert await rate("usd", "eur") == [0.88, "2026-09-24"] and upstream == ["USD"]
     assert await rate.refresh("USD", "EUR") == (0.88, "2026-09-24") and len(upstream) == 2
+
+
+async def test_geocoding_is_cached_separately_from_the_forecast(mock_http):
+    hosts = []
+
+    def handler(req):
+        hosts.append(req.url.host)
+        if "geocoding" in req.url.host:
+            return httpx.Response(200, json={"results": [
+                {"name": "Oslo", "country": "Norway", "latitude": 59.9, "longitude": 10.7}]})
+        return httpx.Response(200, json={
+            "current": {"temperature_2m": 5, "apparent_temperature": 2, "weather_code": 3, "wind_speed_10m": 9},
+            "daily": {"temperature_2m_max": [7], "temperature_2m_min": [1], "precipitation_probability_max": [None]}})
+    mock_http(handler)
+    first = await web_tools.get_weather("Oslo")
+    await web_tools.get_weather.refresh("Oslo")  # weather expired: forecast only
+    assert first.startswith("Oslo, Norway: overcast, 5°C") and first.endswith("Today 1 to 7°C.")
+    assert hosts == ["geocoding-api.open-meteo.com", "api.open-meteo.com", "api.open-meteo.com"]
