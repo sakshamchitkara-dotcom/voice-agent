@@ -48,6 +48,7 @@ class Tool:
     agentic: bool = False  # needs an allowlisted caller
     confirm: Callable[[dict, Ctx], str] | None = None  # describes the action to confirm
     spoken_start: str = "One moment."
+    enabled: Callable[[Any], bool] = lambda s: True  # offered to the model only if true
 
     def schema(self) -> dict:
         props = dict(self.properties)
@@ -203,6 +204,30 @@ def _confirm_reminder(a: dict, ctx: Ctx) -> str:
     return f"{how} at {to} on {local:%A %B %d at %H:%M} to remind you: {a.get('message')}"
 
 
+TRANSFER_APPROVAL = "transfer.approved"  # row in `confirmations`, consumed by the webhook
+
+
+async def _request_transfer(a: dict, ctx: Ctx) -> str:
+    if not get_settings().transfer_number:
+        raise ValueError("Call transfers aren't set up.")
+    if not ctx.call_id:
+        raise ValueError("I can't transfer this call.")
+    with db.connect() as conn:
+        conn.execute("INSERT OR REPLACE INTO confirmations VALUES (?, ?, '', ?)",
+                     (ctx.call_id, TRANSFER_APPROVAL, time.time()))
+    return "Transfer approved. Tell the caller you're connecting them now, then call transferCall."
+
+
+def transfer_approved(call_id: str | None) -> bool:
+    """Consume a fresh approval recorded by request_transfer for this call."""
+    if not call_id:
+        return False
+    with db.connect() as conn:
+        return bool(conn.execute(
+            "DELETE FROM confirmations WHERE call_id = ? AND tool = ? AND created_at >= ?",
+            (call_id, TRANSFER_APPROVAL, time.time() - CONFIRM_TTL_S)).rowcount)
+
+
 async def _deep_task(a: dict, ctx: Ctx) -> str:
     s = get_settings()
     to = _recipient(a, ctx)
@@ -266,6 +291,12 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
           "message": {"type": "string", "description": "What to remind them about"}},
          ["kind", "when", "message"], _schedule_reminder, agentic=True,
          spoken_start="Setting that reminder.", confirm=_confirm_reminder),
+    Tool("request_transfer",
+         "Ask to transfer the caller to the owner's phone. Must succeed before transferCall.",
+         {"reason": {"type": "string", "description": "Why they want to be transferred"}}, [],
+         _request_transfer, agentic=True,
+         enabled=lambda s: bool(s.transfer_number),
+         confirm=lambda a, c: "transfer this call to the owner's phone"),
     Tool("deep_task",
          "Queue a longer research or writing task that runs after the call; results are "
          "sent by SMS or email. Use when an answer needs more than a few seconds of work.",

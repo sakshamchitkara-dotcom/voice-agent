@@ -59,7 +59,7 @@ def tool_defs(s: Settings, trusted: bool) -> list[dict]:
             "messages": [{"type": "request-start", "content": t.spoken_start}],
         }
         for t in TOOLS.values()
-        if trusted or not t.agentic
+        if (trusted or not t.agentic) and t.enabled(s)
     ]
 
 

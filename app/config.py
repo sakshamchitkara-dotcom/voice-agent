@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -12,6 +13,13 @@ def _bool(name: str, default: bool = False) -> bool:
 
 def _list(name: str) -> tuple[str, ...]:
     return tuple(x.strip() for x in os.getenv(name, "").split(",") if x.strip())
+
+
+def _e164(value: str) -> str:
+    value = value.strip()
+    if value and not re.fullmatch(r"\+[1-9]\d{6,14}", value):
+        raise ValueError(f"TRANSFER_NUMBER must be E.164 like +14155550123, got {value!r}")
+    return value
 
 
 @dataclass(frozen=True)
@@ -41,6 +49,8 @@ class Settings:
     vapi_api_key: str
     vapi_phone_number_id: str
     owner_name: str
+    # E.164 number allowlisted callers can be transferred to (Vapi transferCall). Empty = off.
+    transfer_number: str
     timezone: str
     owner_email: str
     # Notifications. Nothing is sent unless DRY_RUN=false AND the channel is configured.
@@ -78,6 +88,7 @@ def load_settings() -> Settings:
         vapi_api_key=e("VAPI_API_KEY", ""),
         vapi_phone_number_id=e("VAPI_PHONE_NUMBER_ID", ""),
         owner_name=e("OWNER_NAME", ""),
+        transfer_number=_e164(e("TRANSFER_NUMBER", "")),
         timezone=e("TIMEZONE", "UTC"),
         owner_email=e("OWNER_EMAIL", ""),
         dry_run=_bool("DRY_RUN", True),

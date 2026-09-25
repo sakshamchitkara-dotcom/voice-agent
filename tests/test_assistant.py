@@ -23,7 +23,7 @@ def test_trusted_caller_gets_all_tools():
 
 def test_untrusted_caller_gets_read_only_tools():
     a = build_assistant(get_settings(), trusted=False)
-    assert names(a) == {name for name, t in TOOLS.items() if not t.agentic}
+    assert names(a) == {name for name, t in TOOLS.items() if not t.agentic and t.enabled(get_settings())}
     assert {"get_weather", "web_search", "fetch_url", "convert"} <= names(a)
     assert not names(a) & {"add_note", "send_followup", "deep_task"}
     assert "not on the allowlist" in a["model"]["messages"][0]["content"]
@@ -55,3 +55,10 @@ def test_memories_are_injected_for_trusted_callers_only():
     untrusted = build_assistant(get_settings(), trusted=False, memories=facts)
     assert "<memory>" not in untrusted["model"]["messages"][0]["content"]
     assert "<memory>" not in build_assistant(get_settings(), trusted=True)["model"]["messages"][0]["content"]
+
+
+def test_request_transfer_only_offered_when_configured():
+    s = get_settings()
+    assert "request_transfer" not in names(build_assistant(s, trusted=True))
+    assert "request_transfer" in names(build_assistant(replace(s, transfer_number="+14155550123"), trusted=True))
+    assert "request_transfer" not in names(build_assistant(replace(s, transfer_number="+14155550123"), trusted=False))

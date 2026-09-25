@@ -158,3 +158,32 @@ async def test_forget_me_needs_confirmation_and_clears_memory():
     assert done["result"] == "Done. I deleted 2 things I remembered about you."
     assert memory.facts_for("+14155550100") == []
     assert (await tools.run(tc("forget_me"), STRANGER))["error"].startswith("That action isn't")
+
+
+async def test_request_transfer_needs_config_and_confirmation(monkeypatch):
+    from app.config import get_settings
+    call = tc("request_transfer", reason="wants to talk to Sam")
+    r = await tools.run(call, TRUSTED)  # confirmation is asked first either way
+    call.args["confirmed"] = True
+    assert (await tools.run(call, TRUSTED))["error"] == "Call transfers aren't set up."
+
+    monkeypatch.setenv("TRANSFER_NUMBER", "+14155550123")
+    get_settings.cache_clear()
+    call.args.pop("confirmed")
+    assert tools.transfer_approved("call-1") is False
+    r = await tools.run(call, TRUSTED)
+    assert "transfer this call to the owner's phone" in r["result"]
+    assert tools.transfer_approved("call-1") is False  # asking is not approving
+    call.args["confirmed"] = True
+    assert (await tools.run(call, TRUSTED))["result"].startswith("Transfer approved.")
+    assert tools.transfer_approved("call-1") is True
+    assert tools.transfer_approved("call-1") is False  # single use
+    assert (await tools.run(tc("request_transfer"), STRANGER))["error"].startswith("That action isn't")
+
+
+def test_transfer_number_must_be_e164(monkeypatch):
+    import pytest
+    from app.config import load_settings
+    monkeypatch.setenv("TRANSFER_NUMBER", "555-1234")
+    with pytest.raises(ValueError, match="E.164"):
+        load_settings()
