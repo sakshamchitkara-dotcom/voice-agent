@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
     dispatcher.cancel()
 
 
-app = FastAPI(title="voice-agent", lifespan=lifespan)
+app = FastAPI(title="voice-agent", version="0.2.0", lifespan=lifespan)
 app.include_router(admin.router)
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
